@@ -1,19 +1,22 @@
 package com.kernitect.saharaandroid.ui.navigation
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.kernitect.saharaandroid.ui.components.SosButton
 
@@ -27,52 +30,107 @@ fun BottomNavigationBar(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(92.dp)
+            .height(94.dp)
     ) {
+
+        /*
+         * Gray bottom area from the design.
+         */
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(72.dp)
+                .height(68.dp)
                 .align(Alignment.BottomCenter),
-            color = Color(0xFFE0E0E0)
+            color = Color(0xFFD9D9D9),
+            shape = RoundedCornerShape(
+                topStart = 28.dp,
+                topEnd = 28.dp
+            )
         ) {
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 28.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                    .padding(
+                        start = 34.dp,
+                        end = 34.dp
+                    ),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TextButton(
-                    onClick = onHomeClick
+
+                /*
+                 * HOME
+                 */
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.CenterStart
                 ) {
-                    Text(
-                        text = "HOME",
-                        color = if (currentDestination == AppDestination.HOME) {
-                            Color.Black
-                        } else {
-                            Color.DarkGray
-                        },
-                        fontWeight = FontWeight.Bold
-                    )
+
+                    IconButton(
+                        onClick = onHomeClick
+                    ) {
+
+                        Icon(
+                            imageVector = Icons.Default.Home,
+                            contentDescription = "Home",
+                            modifier = Modifier.size(34.dp),
+                            tint =
+                                if (
+                                    currentDestination ==
+                                    AppDestination.HOME
+                                ) {
+                                    Color.Black
+                                } else {
+                                    Color(0xFF6F6F6F)
+                                }
+                        )
+                    }
                 }
 
-                TextButton(
-                    onClick = onMapClick
+                /*
+                 * Empty middle space for the SOS button.
+                 */
+                Box(
+                    modifier = Modifier.weight(1f)
+                )
+
+                /*
+                 * MAP
+                 */
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.CenterEnd
                 ) {
-                    Text(
-                        text = "MAP",
-                        color = if (currentDestination == AppDestination.MAP) {
-                            Color.Black
-                        } else {
-                            Color.DarkGray
-                        },
-                        fontWeight = FontWeight.Bold
-                    )
+
+                    IconButton(
+                        onClick = onMapClick
+                    ) {
+
+                        Icon(
+                            imageVector = Icons.Default.LocationOn,
+                            contentDescription = "Map",
+                            modifier = Modifier.size(34.dp),
+                            tint =
+                                if (
+                                    currentDestination ==
+                                    AppDestination.MAP
+                                ) {
+                                    Color.Black
+                                } else {
+                                    Color(0xFF6F6F6F)
+                                }
+                        )
+                    }
                 }
             }
         }
 
+        /*
+         * Large critical SOS button.
+         *
+         * It sits above the navigation background,
+         * like the Figma design.
+         */
         SosButton(
             onClick = onSosClick,
             modifier = Modifier
