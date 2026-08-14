@@ -15,7 +15,8 @@ import androidx.core.content.ContextCompat
 
 class BleGattClient(
     private val context: Context,
-    private val onStatusChanged: (String) -> Unit
+    private val onStatusChanged: (String) -> Unit,
+    private val onMessageSent: (() -> Unit)? = null
 ) {
 
     private var bluetoothGatt: BluetoothGatt? = null
@@ -176,6 +177,8 @@ class BleGattClient(
                     onStatusChanged(
                         "SOS JSON sent successfully"
                     )
+
+                    onMessageSent?.invoke()
 
                 } else {
 

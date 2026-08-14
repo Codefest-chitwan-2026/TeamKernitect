@@ -18,14 +18,24 @@ import androidx.core.content.ContextCompat
 
 class BleGattServer(
     private val context: Context,
-    private val onMessageReceived: (String) -> Unit,
-    private val onStatusChanged: (String) -> Unit
+
+    private val onMessageReceived: (
+        device: BluetoothDevice,
+        message: String
+    ) -> Unit,
+
+    private val onStatusChanged: (String) -> Unit,
+
+    private val onReady: (() -> Unit)? = null
 ) {
 
     private val bluetoothManager =
-        context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        context.getSystemService(
+            Context.BLUETOOTH_SERVICE
+        ) as BluetoothManager
 
-    private var gattServer: BluetoothGattServer? = null
+    private var gattServer:
+            BluetoothGattServer? = null
 
     private val gattServerCallback =
         object : BluetoothGattServerCallback() {
@@ -34,9 +44,20 @@ class BleGattServer(
                 status: Int,
                 service: BluetoothGattService
             ) {
-                if (status == BluetoothGatt.GATT_SUCCESS) {
-                    onStatusChanged("GATT service ready")
+
+                if (
+                    status ==
+                    BluetoothGatt.GATT_SUCCESS
+                ) {
+
+                    onStatusChanged(
+                        "GATT service ready"
+                    )
+
+                    onReady?.invoke()
+
                 } else {
+
                     onStatusChanged(
                         "Failed to add GATT service: $status"
                     )
@@ -48,15 +69,18 @@ class BleGattServer(
                 status: Int,
                 newState: Int
             ) {
+
                 when (newState) {
 
                     BluetoothProfile.STATE_CONNECTED -> {
+
                         onStatusChanged(
                             "GATT client connected"
                         )
                     }
 
                     BluetoothProfile.STATE_DISCONNECTED -> {
+
                         onStatusChanged(
                             "GATT client disconnected"
                         )
@@ -74,26 +98,38 @@ class BleGattServer(
                 value: ByteArray
             ) {
 
-                if (characteristic.uuid != BleConstants.MESSAGE_UUID) {
+                if (
+                    characteristic.uuid !=
+                    BleConstants.MESSAGE_UUID
+                ) {
 
                     if (responseNeeded) {
+
                         sendResponseSafely(
                             device = device,
                             requestId = requestId,
-                            status = BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED
+                            status =
+                                BluetoothGatt
+                                    .GATT_REQUEST_NOT_SUPPORTED
                         )
                     }
 
                     return
                 }
 
-                if (preparedWrite || offset != 0) {
+                if (
+                    preparedWrite ||
+                    offset != 0
+                ) {
 
                     if (responseNeeded) {
+
                         sendResponseSafely(
                             device = device,
                             requestId = requestId,
-                            status = BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED
+                            status =
+                                BluetoothGatt
+                                    .GATT_REQUEST_NOT_SUPPORTED
                         )
                     }
 
@@ -101,15 +137,22 @@ class BleGattServer(
                 }
 
                 val message =
-                    value.toString(Charsets.UTF_8)
+                    value.toString(
+                        Charsets.UTF_8
+                    )
 
-                onMessageReceived(message)
+                onMessageReceived(
+                    device,
+                    message
+                )
 
                 if (responseNeeded) {
+
                     sendResponseSafely(
                         device = device,
                         requestId = requestId,
-                        status = BluetoothGatt.GATT_SUCCESS
+                        status =
+                            BluetoothGatt.GATT_SUCCESS
                     )
                 }
 
@@ -125,12 +168,17 @@ class BleGattServer(
                 descriptor: BluetoothGattDescriptor
             ) {
 
-                if (descriptor.uuid != BleConstants.CCCD_UUID) {
+                if (
+                    descriptor.uuid !=
+                    BleConstants.CCCD_UUID
+                ) {
 
                     sendResponseSafely(
                         device = device,
                         requestId = requestId,
-                        status = BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED
+                        status =
+                            BluetoothGatt
+                                .GATT_REQUEST_NOT_SUPPORTED
                     )
 
                     return
@@ -139,8 +187,13 @@ class BleGattServer(
                 sendResponseSafely(
                     device = device,
                     requestId = requestId,
-                    status = BluetoothGatt.GATT_SUCCESS,
-                    value = byteArrayOf(0x00, 0x00)
+                    status =
+                        BluetoothGatt.GATT_SUCCESS,
+                    value =
+                        byteArrayOf(
+                            0x00,
+                            0x00
+                        )
                 )
             }
 
@@ -159,7 +212,8 @@ class BleGattServer(
                 }
 
                 if (
-                    descriptor.uuid == BleConstants.CCCD_UUID &&
+                    descriptor.uuid ==
+                    BleConstants.CCCD_UUID &&
                     !preparedWrite &&
                     offset == 0
                 ) {
@@ -167,7 +221,8 @@ class BleGattServer(
                     sendResponseSafely(
                         device = device,
                         requestId = requestId,
-                        status = BluetoothGatt.GATT_SUCCESS
+                        status =
+                            BluetoothGatt.GATT_SUCCESS
                     )
 
                 } else {
@@ -175,15 +230,21 @@ class BleGattServer(
                     sendResponseSafely(
                         device = device,
                         requestId = requestId,
-                        status = BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED
+                        status =
+                            BluetoothGatt
+                                .GATT_REQUEST_NOT_SUPPORTED
                     )
                 }
             }
         }
 
-    private fun hasBluetoothConnectPermission(): Boolean {
+    private fun hasBluetoothConnectPermission():
+            Boolean {
 
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        if (
+            Build.VERSION.SDK_INT <
+            Build.VERSION_CODES.S
+        ) {
             return true
         }
 
@@ -196,23 +257,32 @@ class BleGattServer(
     fun startServer() {
 
         if (!hasBluetoothConnectPermission()) {
+
             onStatusChanged(
                 "GATT server failed: Bluetooth permission missing"
             )
+
             return
         }
 
-        if (!AppRequirements.isBluetoothEnabled(context)) {
+        if (
+            !AppRequirements
+                .isBluetoothEnabled(context)
+        ) {
+
             onStatusChanged(
                 "GATT server failed: Bluetooth is off"
             )
+
             return
         }
 
         if (gattServer != null) {
+
             onStatusChanged(
                 "GATT server already running"
             )
+
             return
         }
 
@@ -231,43 +301,52 @@ class BleGattServer(
                 )
 
             if (server == null) {
+
                 onStatusChanged(
                     "Failed to open GATT server"
                 )
+
                 return
             }
 
             val service =
                 BluetoothGattService(
                     BleConstants.SERVICE_UUID,
-                    BluetoothGattService.SERVICE_TYPE_PRIMARY
+                    BluetoothGattService
+                        .SERVICE_TYPE_PRIMARY
                 )
 
             val messageCharacteristic =
                 BluetoothGattCharacteristic(
                     BleConstants.MESSAGE_UUID,
 
-                    BluetoothGattCharacteristic.PROPERTY_WRITE or
-                            BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE or
-                            BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+                    BluetoothGattCharacteristic
+                        .PROPERTY_WRITE or
+                            BluetoothGattCharacteristic
+                                .PROPERTY_WRITE_NO_RESPONSE or
+                            BluetoothGattCharacteristic
+                                .PROPERTY_NOTIFY,
 
-                    BluetoothGattCharacteristic.PERMISSION_WRITE
+                    BluetoothGattCharacteristic
+                        .PERMISSION_WRITE
                 )
 
             val cccdDescriptor =
                 BluetoothGattDescriptor(
                     BleConstants.CCCD_UUID,
 
-                    BluetoothGattDescriptor.PERMISSION_READ or
-                            BluetoothGattDescriptor.PERMISSION_WRITE
+                    BluetoothGattDescriptor
+                        .PERMISSION_READ or
+                            BluetoothGattDescriptor
+                                .PERMISSION_WRITE
                 )
 
-            val descriptorAdded =
-                messageCharacteristic.addDescriptor(
-                    cccdDescriptor
-                )
-
-            if (!descriptorAdded) {
+            if (
+                !messageCharacteristic
+                    .addDescriptor(
+                        cccdDescriptor
+                    )
+            ) {
 
                 onStatusChanged(
                     "Failed to add CCCD descriptor"
@@ -278,12 +357,11 @@ class BleGattServer(
                 return
             }
 
-            val characteristicAdded =
-                service.addCharacteristic(
+            if (
+                !service.addCharacteristic(
                     messageCharacteristic
                 )
-
-            if (!characteristicAdded) {
+            ) {
 
                 onStatusChanged(
                     "Failed to add MESSAGE characteristic"
@@ -294,12 +372,14 @@ class BleGattServer(
                 return
             }
 
-            gattServer = server
+            gattServer =
+                server
 
-            val serviceStarted =
-                server.addService(service)
-
-            if (!serviceStarted) {
+            if (
+                !server.addService(
+                    service
+                )
+            ) {
 
                 onStatusChanged(
                     "Failed to start GATT service"
@@ -316,7 +396,7 @@ class BleGattServer(
                 "Starting GATT server..."
             )
 
-        } catch (e: SecurityException) {
+        } catch (_: SecurityException) {
 
             gattServer = null
 
@@ -381,10 +461,6 @@ class BleGattServer(
 
             gattServer = null
 
-            onStatusChanged(
-                "GATT server stopped"
-            )
-
             return
         }
 
@@ -400,7 +476,7 @@ class BleGattServer(
             gattServer?.close()
 
         } catch (_: SecurityException) {
-            // Permission may have been revoked while the app was running.
+            // Cleanup only.
         }
 
         gattServer = null
