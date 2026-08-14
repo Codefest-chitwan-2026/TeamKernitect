@@ -38,6 +38,7 @@ import com.kernitect.saharaandroid.ble.BleAdvertiser
 import com.kernitect.saharaandroid.ble.BleGattClient
 import com.kernitect.saharaandroid.ble.BleGattServer
 import com.kernitect.saharaandroid.ble.BleScanner
+import com.kernitect.saharaandroid.location.LocationProvider
 import com.kernitect.saharaandroid.model.RescuePacket
 import com.kernitect.saharaandroid.ui.theme.SaharaAndroidTheme
 
@@ -47,11 +48,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
+
             SaharaAndroidTheme {
+
                 Surface(
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    RescueMeshTestScreen()
+
+                    RescueMeshScreen()
                 }
             }
         }
@@ -59,7 +63,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun RescueMeshTestScreen() {
+fun RescueMeshScreen() {
 
     val context =
         LocalContext.current
@@ -92,32 +96,43 @@ fun RescueMeshTestScreen() {
         )
     }
 
-    var foundDevice by remember {
-        mutableStateOf<BluetoothDevice?>(
-            null
+    var locationStatus by remember {
+        mutableStateOf(
+            "Location not requested"
         )
+    }
+
+    var latitude by remember {
+        mutableStateOf<Double?>(null)
+    }
+
+    var longitude by remember {
+        mutableStateOf<Double?>(null)
+    }
+
+    var locationAccuracy by remember {
+        mutableStateOf<Float?>(null)
+    }
+
+    var foundDevice by remember {
+        mutableStateOf<BluetoothDevice?>(null)
     }
 
     var foundRssi by remember {
-        mutableStateOf<Int?>(
-            null
-        )
+        mutableStateOf<Int?>(null)
     }
 
     var receivedMessage by remember {
-        mutableStateOf<String?>(
-            null
-        )
+        mutableStateOf<String?>(null)
     }
 
     var outgoingMessage by remember {
-        mutableStateOf<String?>(
-            null
-        )
+        mutableStateOf<String?>(null)
     }
 
     val advertiser =
         remember {
+
             BleAdvertiser(
                 context =
                     context.applicationContext,
@@ -130,13 +145,12 @@ fun RescueMeshTestScreen() {
 
     val scanner =
         remember {
+
             BleScanner(
                 context =
                     context.applicationContext,
 
-                onDeviceFound = {
-                        device,
-                        rssi ->
+                onDeviceFound = { device, rssi ->
 
                     foundDevice = device
                     foundRssi = rssi
@@ -153,6 +167,7 @@ fun RescueMeshTestScreen() {
 
     val gattServer =
         remember {
+
             BleGattServer(
                 context =
                     context.applicationContext,
@@ -169,6 +184,7 @@ fun RescueMeshTestScreen() {
 
     val gattClient =
         remember {
+
             BleGattClient(
                 context =
                     context.applicationContext,
@@ -176,6 +192,14 @@ fun RescueMeshTestScreen() {
                 onStatusChanged = {
                     gattClientStatus = it
                 }
+            )
+        }
+
+    val locationProvider =
+        remember {
+
+            LocationProvider(
+                context.applicationContext
             )
         }
 
@@ -199,6 +223,7 @@ fun RescueMeshTestScreen() {
                 ActivityResultContracts
                     .RequestMultiplePermissions()
         ) {
+
             refreshKey++
         }
 
@@ -208,6 +233,7 @@ fun RescueMeshTestScreen() {
                 ActivityResultContracts
                     .StartActivityForResult()
         ) {
+
             refreshKey++
         }
 
@@ -217,6 +243,7 @@ fun RescueMeshTestScreen() {
                 ActivityResultContracts
                     .StartActivityForResult()
         ) {
+
             refreshKey++
         }
 
@@ -230,27 +257,19 @@ fun RescueMeshTestScreen() {
 
     val permissionsGranted =
         AppRequirements
-            .hasAllRuntimePermissions(
-                context
-            )
+            .hasAllRuntimePermissions(context)
 
     val preciseLocationGranted =
         AppRequirements
-            .hasPreciseLocationPermission(
-                context
-            )
+            .hasPreciseLocationPermission(context)
 
     val bluetoothEnabled =
         AppRequirements
-            .isBluetoothEnabled(
-                context
-            )
+            .isBluetoothEnabled(context)
 
     val locationEnabled =
         AppRequirements
-            .isLocationEnabled(
-                context
-            )
+            .isLocationEnabled(context)
 
     val ready =
         supportsBle &&
@@ -268,11 +287,17 @@ fun RescueMeshTestScreen() {
             .padding(24.dp),
 
         verticalArrangement =
-            Arrangement.Center
+            Arrangement.Top
     ) {
+
+        Spacer(
+            modifier =
+                Modifier.height(24.dp)
+        )
 
         Text(
             text = "SAHARA",
+
             style =
                 MaterialTheme
                     .typography
@@ -281,7 +306,7 @@ fun RescueMeshTestScreen() {
 
         Text(
             text =
-                "RESCUEMESH GATT Test",
+                "RESCUEMESH SOS Test",
 
             style =
                 MaterialTheme
@@ -295,33 +320,33 @@ fun RescueMeshTestScreen() {
         )
 
         RequirementRow(
-            "BLE supported",
-            supportsBle
+            name = "BLE supported",
+            satisfied = supportsBle
         )
 
         RequirementRow(
-            "Permissions granted",
-            permissionsGranted
+            name = "Permissions granted",
+            satisfied = permissionsGranted
         )
 
         RequirementRow(
-            "Precise location",
-            preciseLocationGranted
+            name = "Precise location",
+            satisfied = preciseLocationGranted
         )
 
         RequirementRow(
-            "Bluetooth enabled",
-            bluetoothEnabled
+            name = "Bluetooth enabled",
+            satisfied = bluetoothEnabled
         )
 
         RequirementRow(
-            "Location enabled",
-            locationEnabled
+            name = "Location enabled",
+            satisfied = locationEnabled
         )
 
         Spacer(
             modifier =
-                Modifier.height(20.dp)
+                Modifier.height(16.dp)
         )
 
         if (!permissionsGranted) {
@@ -363,6 +388,8 @@ fun RescueMeshTestScreen() {
                     )
                 },
 
+                enabled = permissionsGranted,
+
                 modifier =
                     Modifier.fillMaxWidth()
             ) {
@@ -383,13 +410,12 @@ fun RescueMeshTestScreen() {
             Button(
                 onClick = {
 
-                    locationSettingsLauncher
-                        .launch(
-                            Intent(
-                                Settings
-                                    .ACTION_LOCATION_SOURCE_SETTINGS
-                            )
+                    locationSettingsLauncher.launch(
+                        Intent(
+                            Settings
+                                .ACTION_LOCATION_SOURCE_SETTINGS
                         )
+                    )
                 },
 
                 modifier =
@@ -403,6 +429,17 @@ fun RescueMeshTestScreen() {
         }
 
         if (!ready) {
+
+            Spacer(
+                modifier =
+                    Modifier.height(16.dp)
+            )
+
+            Text(
+                text =
+                    "Complete the requirements before starting RESCUEMESH."
+            )
+
             return@Column
         }
 
@@ -411,8 +448,12 @@ fun RescueMeshTestScreen() {
                 Modifier.height(24.dp)
         )
 
+        /*
+         * RECEIVER
+         */
+
         Text(
-            text = "RECEIVER CONTROLS",
+            text = "RECEIVER / RELAY",
 
             style =
                 MaterialTheme
@@ -427,6 +468,7 @@ fun RescueMeshTestScreen() {
 
         Button(
             onClick = {
+
                 gattServer.startServer()
             },
 
@@ -446,6 +488,7 @@ fun RescueMeshTestScreen() {
 
         Button(
             onClick = {
+
                 advertiser.startAdvertising()
             },
 
@@ -473,7 +516,7 @@ fun RescueMeshTestScreen() {
                 "Advertiser: $advertiserStatus"
         )
 
-        receivedMessage?.let {
+        receivedMessage?.let { message ->
 
             Spacer(
                 modifier =
@@ -482,22 +525,25 @@ fun RescueMeshTestScreen() {
 
             Text(
                 text =
-                    "RECEIVED JSON:"
+                    "RECEIVED SOS:"
             )
 
             Text(
-                text = it
+                text = message
             )
         }
 
         Spacer(
             modifier =
-                Modifier.height(30.dp)
+                Modifier.height(32.dp)
         )
 
+        /*
+         * SENDER
+         */
+
         Text(
-            text =
-                "SENDER CONTROLS",
+            text = "SOS SENDER",
 
             style =
                 MaterialTheme
@@ -524,7 +570,7 @@ fun RescueMeshTestScreen() {
         ) {
 
             Text(
-                "Start Scanning"
+                "Find Nearby RESCUEMESH Device"
             )
         }
 
@@ -535,6 +581,7 @@ fun RescueMeshTestScreen() {
 
         Button(
             onClick = {
+
                 scanner.stopScanning()
             },
 
@@ -557,59 +604,106 @@ fun RescueMeshTestScreen() {
                 "Scanner: $scannerStatus"
         )
 
-        foundDevice?.let { device ->
-
-            Spacer(
-                modifier =
-                    Modifier.height(8.dp)
-            )
+        foundDevice?.let {
 
             Text(
                 text =
-                    "Device: ${device.address}"
+                    "Relay device found"
             )
 
             Text(
                 text =
                     "RSSI: ${foundRssi ?: "?"} dBm"
             )
+        }
 
-            Spacer(
-                modifier =
-                    Modifier.height(12.dp)
-            )
+        Spacer(
+            modifier =
+                Modifier.height(24.dp)
+        )
 
-            Button(
-                onClick = {
+        /*
+         * ACTUAL SOS BUTTON
+         */
 
-                    scanner.stopScanning()
+        Button(
+            onClick = {
 
-                    val packet =
-                        RescuePacket.createSos(
-                            latitude = 27.6812,
-                            longitude = 84.4321
+                val device =
+                    foundDevice
+
+                if (device == null) {
+
+                    locationStatus =
+                        "No RESCUEMESH relay found. Scan first."
+
+                    return@Button
+                }
+
+                locationStatus =
+                    "Getting current location..."
+
+                locationProvider.getCurrentLocation(
+
+                    onSuccess = { location ->
+
+                        latitude =
+                            location.latitude
+
+                        longitude =
+                            location.longitude
+
+                        locationAccuracy =
+                            location.accuracy
+                            location.accuracy
+
+                        locationStatus =
+                            "Location captured"
+
+                        val packet =
+                            RescuePacket.createSos(
+                                latitude =
+                                    location.latitude,
+
+                                longitude =
+                                    location.longitude
+                            )
+
+                        val json =
+                            packet.toJson()
+
+                        outgoingMessage =
+                            json
+
+                        scanner.stopScanning()
+
+                        gattClient.connectAndSend(
+                            device = device,
+                            message = json
                         )
+                    },
 
-                    val json =
-                        packet.toJson()
+                    onError = { error ->
 
-                    outgoingMessage =
-                        json
-
-                    gattClient.connectAndSend(
-                        device,
-                        json
-                    )
-                },
-
-                modifier =
-                    Modifier.fillMaxWidth()
-            ) {
-
-                Text(
-                    "Send Test SOS"
+                        locationStatus =
+                            "Location error: $error"
+                    }
                 )
-            }
+            },
+
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(72.dp)
+        ) {
+
+            Text(
+                text = "SEND SOS",
+
+                style =
+                    MaterialTheme
+                        .typography
+                        .titleLarge
+            )
         }
 
         Spacer(
@@ -619,10 +713,49 @@ fun RescueMeshTestScreen() {
 
         Text(
             text =
-                "Client: $gattClientStatus"
+                "Location: $locationStatus"
         )
 
-        outgoingMessage?.let {
+        latitude?.let { lat ->
+
+            Text(
+                text =
+                    "Latitude: $lat"
+            )
+        }
+
+        longitude?.let { lon ->
+
+            Text(
+                text =
+                    "Longitude: $lon"
+            )
+        }
+
+        Spacer(
+            modifier =
+                Modifier.height(12.dp)
+        )
+
+        locationAccuracy?.let { accuracy ->
+
+            Text(
+                text =
+                    "Accuracy: ${accuracy.toInt()} meters"
+            )
+        }
+
+        Spacer(
+            modifier =
+                Modifier.height(12.dp)
+        )
+
+        Text(
+            text =
+                "BLE client: $gattClientStatus"
+        )
+
+        outgoingMessage?.let { message ->
 
             Spacer(
                 modifier =
@@ -631,17 +764,17 @@ fun RescueMeshTestScreen() {
 
             Text(
                 text =
-                    "SENT JSON:"
+                    "SENT SOS JSON:"
             )
 
             Text(
-                text = it
+                text = message
             )
         }
 
         Spacer(
             modifier =
-                Modifier.height(30.dp)
+                Modifier.height(40.dp)
         )
     }
 }
@@ -653,20 +786,20 @@ private fun RequirementRow(
 ) {
 
     Row(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .padding(
-                    vertical = 4.dp
-                )
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                vertical = 4.dp
+            )
     ) {
 
         Text(
             text =
-                if (satisfied)
+                if (satisfied) {
                     "✓"
-                else
-                    "✗",
+                } else {
+                    "✗"
+                },
 
             modifier =
                 Modifier.padding(
