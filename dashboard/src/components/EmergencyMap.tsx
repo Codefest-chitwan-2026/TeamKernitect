@@ -84,7 +84,7 @@ export default function EmergencyMap() {
       </div>
 
       {/* Real Map */}
-      <div className="h-[500px] w-full">
+      <div className="h-125 w-full">
         <MapContainer
           center={[28.3949, 84.124]}
           zoom={7}
