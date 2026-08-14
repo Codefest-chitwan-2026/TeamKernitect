@@ -1,6 +1,7 @@
 package com.kernitect.saharaandroid
 
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
@@ -16,6 +17,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -32,7 +35,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.kernitect.saharaandroid.ble.AppRequirements
 import com.kernitect.saharaandroid.ble.BleAdvertiser
+import com.kernitect.saharaandroid.ble.BleGattClient
+import com.kernitect.saharaandroid.ble.BleGattServer
 import com.kernitect.saharaandroid.ble.BleScanner
+import com.kernitect.saharaandroid.model.RescuePacket
 import com.kernitect.saharaandroid.ui.theme.SaharaAndroidTheme
 
 class MainActivity : ComponentActivity() {
@@ -45,7 +51,7 @@ class MainActivity : ComponentActivity() {
                 Surface(
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    RequirementsScreen()
+                    RescueMeshTestScreen()
                 }
             }
         }
@@ -53,102 +59,198 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun RequirementsScreen() {
+fun RescueMeshTestScreen() {
 
-    val context = LocalContext.current
+    val context =
+        LocalContext.current
 
     var refreshKey by remember {
         mutableIntStateOf(0)
     }
 
     var advertiserStatus by remember {
-        mutableStateOf("Not advertising")
+        mutableStateOf(
+            "Not advertising"
+        )
     }
 
     var scannerStatus by remember {
-        mutableStateOf("Not scanning")
+        mutableStateOf(
+            "Not scanning"
+        )
+    }
+
+    var gattServerStatus by remember {
+        mutableStateOf(
+            "GATT server stopped"
+        )
+    }
+
+    var gattClientStatus by remember {
+        mutableStateOf(
+            "GATT client idle"
+        )
     }
 
     var foundDevice by remember {
-        mutableStateOf<String?>(null)
+        mutableStateOf<BluetoothDevice?>(
+            null
+        )
     }
 
     var foundRssi by remember {
-        mutableStateOf<Int?>(null)
-    }
-
-    val advertiser = remember {
-        BleAdvertiser(
-            context = context.applicationContext,
-            onStatusChanged = { status ->
-                advertiserStatus = status
-            }
+        mutableStateOf<Int?>(
+            null
         )
     }
 
-    val scanner = remember {
-        BleScanner(
-            context = context.applicationContext,
-
-            onDeviceFound = { address, rssi ->
-                foundDevice = address
-                foundRssi = rssi
-
-                scannerStatus =
-                    "RESCUEMESH device found"
-            },
-
-            onStatusChanged = { status ->
-                scannerStatus = status
-            }
+    var receivedMessage by remember {
+        mutableStateOf<String?>(
+            null
         )
     }
+
+    var outgoingMessage by remember {
+        mutableStateOf<String?>(
+            null
+        )
+    }
+
+    val advertiser =
+        remember {
+            BleAdvertiser(
+                context =
+                    context.applicationContext,
+
+                onStatusChanged = {
+                    advertiserStatus = it
+                }
+            )
+        }
+
+    val scanner =
+        remember {
+            BleScanner(
+                context =
+                    context.applicationContext,
+
+                onDeviceFound = {
+                        device,
+                        rssi ->
+
+                    foundDevice = device
+                    foundRssi = rssi
+
+                    scannerStatus =
+                        "RESCUEMESH device found"
+                },
+
+                onStatusChanged = {
+                    scannerStatus = it
+                }
+            )
+        }
+
+    val gattServer =
+        remember {
+            BleGattServer(
+                context =
+                    context.applicationContext,
+
+                onMessageReceived = {
+                    receivedMessage = it
+                },
+
+                onStatusChanged = {
+                    gattServerStatus = it
+                }
+            )
+        }
+
+    val gattClient =
+        remember {
+            BleGattClient(
+                context =
+                    context.applicationContext,
+
+                onStatusChanged = {
+                    gattClientStatus = it
+                }
+            )
+        }
 
     DisposableEffect(Unit) {
+
         onDispose {
+
             advertiser.stopAdvertising()
+
             scanner.stopScanning()
+
+            gattServer.stopServer()
+
+            gattClient.close()
         }
     }
 
     val permissionLauncher =
         rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.RequestMultiplePermissions()
+            contract =
+                ActivityResultContracts
+                    .RequestMultiplePermissions()
         ) {
             refreshKey++
         }
 
     val bluetoothLauncher =
         rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.StartActivityForResult()
+            contract =
+                ActivityResultContracts
+                    .StartActivityForResult()
         ) {
             refreshKey++
         }
 
     val locationSettingsLauncher =
         rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.StartActivityForResult()
+            contract =
+                ActivityResultContracts
+                    .StartActivityForResult()
         ) {
             refreshKey++
         }
 
     @Suppress("UNUSED_VARIABLE")
-    val currentRefreshKey = refreshKey
+    val currentRefreshKey =
+        refreshKey
 
     val supportsBle =
-        AppRequirements.supportsBle(context)
+        AppRequirements
+            .supportsBle(context)
 
     val permissionsGranted =
-        AppRequirements.hasAllRuntimePermissions(context)
+        AppRequirements
+            .hasAllRuntimePermissions(
+                context
+            )
 
     val preciseLocationGranted =
-        AppRequirements.hasPreciseLocationPermission(context)
+        AppRequirements
+            .hasPreciseLocationPermission(
+                context
+            )
 
     val bluetoothEnabled =
-        AppRequirements.isBluetoothEnabled(context)
+        AppRequirements
+            .isBluetoothEnabled(
+                context
+            )
 
     val locationEnabled =
-        AppRequirements.isLocationEnabled(context)
+        AppRequirements
+            .isLocationEnabled(
+                context
+            )
 
     val ready =
         supportsBle &&
@@ -160,72 +262,91 @@ fun RequirementsScreen() {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(
+                rememberScrollState()
+            )
             .padding(24.dp),
-        verticalArrangement = Arrangement.Center
+
+        verticalArrangement =
+            Arrangement.Center
     ) {
 
         Text(
             text = "SAHARA",
-            style = MaterialTheme.typography.headlineLarge
-        )
-
-        Spacer(
-            modifier = Modifier.height(8.dp)
+            style =
+                MaterialTheme
+                    .typography
+                    .headlineLarge
         )
 
         Text(
-            text = "RESCUEMESH BLE Test",
-            style = MaterialTheme.typography.titleMedium
+            text =
+                "RESCUEMESH GATT Test",
+
+            style =
+                MaterialTheme
+                    .typography
+                    .titleMedium
         )
 
         Spacer(
-            modifier = Modifier.height(24.dp)
+            modifier =
+                Modifier.height(20.dp)
         )
 
         RequirementRow(
-            name = "BLE supported",
-            satisfied = supportsBle
+            "BLE supported",
+            supportsBle
         )
 
         RequirementRow(
-            name = "Permissions granted",
-            satisfied = permissionsGranted
+            "Permissions granted",
+            permissionsGranted
         )
 
         RequirementRow(
-            name = "Precise location",
-            satisfied = preciseLocationGranted
+            "Precise location",
+            preciseLocationGranted
         )
 
         RequirementRow(
-            name = "Bluetooth enabled",
-            satisfied = bluetoothEnabled
+            "Bluetooth enabled",
+            bluetoothEnabled
         )
 
         RequirementRow(
-            name = "Location enabled",
-            satisfied = locationEnabled
+            "Location enabled",
+            locationEnabled
         )
 
         Spacer(
-            modifier = Modifier.height(24.dp)
+            modifier =
+                Modifier.height(20.dp)
         )
 
         if (!permissionsGranted) {
 
             Button(
                 onClick = {
+
                     permissionLauncher.launch(
-                        AppRequirements.requiredRuntimePermissions()
+                        AppRequirements
+                            .requiredRuntimePermissions()
                     )
                 },
-                modifier = Modifier.fillMaxWidth()
+
+                modifier =
+                    Modifier.fillMaxWidth()
             ) {
-                Text("Grant Permissions")
+
+                Text(
+                    "Grant Permissions"
+                )
             }
 
             Spacer(
-                modifier = Modifier.height(8.dp)
+                modifier =
+                    Modifier.height(8.dp)
             )
         }
 
@@ -233,19 +354,27 @@ fun RequirementsScreen() {
 
             Button(
                 onClick = {
-                    val intent =
-                        Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
 
-                    bluetoothLauncher.launch(intent)
+                    bluetoothLauncher.launch(
+                        Intent(
+                            BluetoothAdapter
+                                .ACTION_REQUEST_ENABLE
+                        )
+                    )
                 },
-                enabled = permissionsGranted,
-                modifier = Modifier.fillMaxWidth()
+
+                modifier =
+                    Modifier.fillMaxWidth()
             ) {
-                Text("Enable Bluetooth")
+
+                Text(
+                    "Enable Bluetooth"
+                )
             }
 
             Spacer(
-                modifier = Modifier.height(8.dp)
+                modifier =
+                    Modifier.height(8.dp)
             )
         }
 
@@ -253,118 +382,267 @@ fun RequirementsScreen() {
 
             Button(
                 onClick = {
-                    val intent =
-                        Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
 
-                    locationSettingsLauncher.launch(intent)
+                    locationSettingsLauncher
+                        .launch(
+                            Intent(
+                                Settings
+                                    .ACTION_LOCATION_SOURCE_SETTINGS
+                            )
+                        )
                 },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Enable Location")
-            }
 
-            Spacer(
-                modifier = Modifier.height(8.dp)
+                modifier =
+                    Modifier.fillMaxWidth()
+            ) {
+
+                Text(
+                    "Enable Location"
+                )
+            }
+        }
+
+        if (!ready) {
+            return@Column
+        }
+
+        Spacer(
+            modifier =
+                Modifier.height(24.dp)
+        )
+
+        Text(
+            text = "RECEIVER CONTROLS",
+
+            style =
+                MaterialTheme
+                    .typography
+                    .titleMedium
+        )
+
+        Spacer(
+            modifier =
+                Modifier.height(8.dp)
+        )
+
+        Button(
+            onClick = {
+                gattServer.startServer()
+            },
+
+            modifier =
+                Modifier.fillMaxWidth()
+        ) {
+
+            Text(
+                "Start GATT Server"
             )
         }
 
-        if (ready) {
+        Spacer(
+            modifier =
+                Modifier.height(8.dp)
+        )
+
+        Button(
+            onClick = {
+                advertiser.startAdvertising()
+            },
+
+            modifier =
+                Modifier.fillMaxWidth()
+        ) {
 
             Text(
-                text = "Ready for RESCUEMESH",
-                style = MaterialTheme.typography.titleMedium
+                "Start Advertising"
             )
+        }
+
+        Spacer(
+            modifier =
+                Modifier.height(8.dp)
+        )
+
+        Text(
+            text =
+                "Server: $gattServerStatus"
+        )
+
+        Text(
+            text =
+                "Advertiser: $advertiserStatus"
+        )
+
+        receivedMessage?.let {
 
             Spacer(
-                modifier = Modifier.height(20.dp)
-            )
-
-            Button(
-                onClick = {
-                    advertiser.startAdvertising()
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Start Advertising")
-            }
-
-            Spacer(
-                modifier = Modifier.height(8.dp)
-            )
-
-            Button(
-                onClick = {
-                    advertiser.stopAdvertising()
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Stop Advertising")
-            }
-
-            Spacer(
-                modifier = Modifier.height(12.dp)
+                modifier =
+                    Modifier.height(12.dp)
             )
 
             Text(
-                text = "Advertiser: $advertiserStatus"
+                text =
+                    "RECEIVED JSON:"
+            )
+
+            Text(
+                text = it
+            )
+        }
+
+        Spacer(
+            modifier =
+                Modifier.height(30.dp)
+        )
+
+        Text(
+            text =
+                "SENDER CONTROLS",
+
+            style =
+                MaterialTheme
+                    .typography
+                    .titleMedium
+        )
+
+        Spacer(
+            modifier =
+                Modifier.height(8.dp)
+        )
+
+        Button(
+            onClick = {
+
+                foundDevice = null
+                foundRssi = null
+
+                scanner.startScanning()
+            },
+
+            modifier =
+                Modifier.fillMaxWidth()
+        ) {
+
+            Text(
+                "Start Scanning"
+            )
+        }
+
+        Spacer(
+            modifier =
+                Modifier.height(8.dp)
+        )
+
+        Button(
+            onClick = {
+                scanner.stopScanning()
+            },
+
+            modifier =
+                Modifier.fillMaxWidth()
+        ) {
+
+            Text(
+                "Stop Scanning"
+            )
+        }
+
+        Spacer(
+            modifier =
+                Modifier.height(8.dp)
+        )
+
+        Text(
+            text =
+                "Scanner: $scannerStatus"
+        )
+
+        foundDevice?.let { device ->
+
+            Spacer(
+                modifier =
+                    Modifier.height(8.dp)
+            )
+
+            Text(
+                text =
+                    "Device: ${device.address}"
+            )
+
+            Text(
+                text =
+                    "RSSI: ${foundRssi ?: "?"} dBm"
             )
 
             Spacer(
-                modifier = Modifier.height(20.dp)
+                modifier =
+                    Modifier.height(12.dp)
             )
 
             Button(
                 onClick = {
-                    foundDevice = null
-                    foundRssi = null
 
-                    scanner.startScanning()
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Start Scanning")
-            }
-
-            Spacer(
-                modifier = Modifier.height(8.dp)
-            )
-
-            Button(
-                onClick = {
                     scanner.stopScanning()
+
+                    val packet =
+                        RescuePacket.createSos(
+                            latitude = 27.6812,
+                            longitude = 84.4321
+                        )
+
+                    val json =
+                        packet.toJson()
+
+                    outgoingMessage =
+                        json
+
+                    gattClient.connectAndSend(
+                        device,
+                        json
+                    )
                 },
-                modifier = Modifier.fillMaxWidth()
+
+                modifier =
+                    Modifier.fillMaxWidth()
             ) {
-                Text("Stop Scanning")
-            }
-
-            Spacer(
-                modifier = Modifier.height(12.dp)
-            )
-
-            Text(
-                text = "Scanner: $scannerStatus"
-            )
-
-            foundDevice?.let { address ->
-
-                Spacer(
-                    modifier = Modifier.height(12.dp)
-                )
 
                 Text(
-                    text = "Found RESCUEMESH device"
-                )
-
-                Text(
-                    text = "Address: $address"
-                )
-
-                Text(
-                    text = "RSSI: ${foundRssi ?: "?"} dBm"
+                    "Send Test SOS"
                 )
             }
         }
+
+        Spacer(
+            modifier =
+                Modifier.height(12.dp)
+        )
+
+        Text(
+            text =
+                "Client: $gattClientStatus"
+        )
+
+        outgoingMessage?.let {
+
+            Spacer(
+                modifier =
+                    Modifier.height(12.dp)
+            )
+
+            Text(
+                text =
+                    "SENT JSON:"
+            )
+
+            Text(
+                text = it
+            )
+        }
+
+        Spacer(
+            modifier =
+                Modifier.height(30.dp)
+        )
     }
 }
 
@@ -375,14 +653,25 @@ private fun RequirementRow(
 ) {
 
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(
+                    vertical = 4.dp
+                )
     ) {
 
         Text(
-            text = if (satisfied) "✓" else "✗",
-            modifier = Modifier.padding(end = 12.dp)
+            text =
+                if (satisfied)
+                    "✓"
+                else
+                    "✗",
+
+            modifier =
+                Modifier.padding(
+                    end = 12.dp
+                )
         )
 
         Text(
