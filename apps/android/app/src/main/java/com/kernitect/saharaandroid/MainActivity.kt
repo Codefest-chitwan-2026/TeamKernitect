@@ -21,14 +21,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.kernitect.saharaandroid.ble.AppRequirements
+import com.kernitect.saharaandroid.ble.BleAdvertiser
+import com.kernitect.saharaandroid.ble.BleScanner
 import com.kernitect.saharaandroid.ui.theme.SaharaAndroidTheme
 
 class MainActivity : ComponentActivity() {
@@ -57,6 +61,56 @@ fun RequirementsScreen() {
         mutableIntStateOf(0)
     }
 
+    var advertiserStatus by remember {
+        mutableStateOf("Not advertising")
+    }
+
+    var scannerStatus by remember {
+        mutableStateOf("Not scanning")
+    }
+
+    var foundDevice by remember {
+        mutableStateOf<String?>(null)
+    }
+
+    var foundRssi by remember {
+        mutableStateOf<Int?>(null)
+    }
+
+    val advertiser = remember {
+        BleAdvertiser(
+            context = context.applicationContext,
+            onStatusChanged = { status ->
+                advertiserStatus = status
+            }
+        )
+    }
+
+    val scanner = remember {
+        BleScanner(
+            context = context.applicationContext,
+
+            onDeviceFound = { address, rssi ->
+                foundDevice = address
+                foundRssi = rssi
+
+                scannerStatus =
+                    "RESCUEMESH device found"
+            },
+
+            onStatusChanged = { status ->
+                scannerStatus = status
+            }
+        )
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            advertiser.stopAdvertising()
+            scanner.stopScanning()
+        }
+    }
+
     val permissionLauncher =
         rememberLauncherForActivityResult(
             contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -78,7 +132,6 @@ fun RequirementsScreen() {
             refreshKey++
         }
 
-    // Forces these checks to re-run after returning from a system dialog.
     @Suppress("UNUSED_VARIABLE")
     val currentRefreshKey = refreshKey
 
@@ -121,12 +174,12 @@ fun RequirementsScreen() {
         )
 
         Text(
-            text = "RESCUEMESH Device Setup",
+            text = "RESCUEMESH BLE Test",
             style = MaterialTheme.typography.titleMedium
         )
 
         Spacer(
-            modifier = Modifier.height(32.dp)
+            modifier = Modifier.height(24.dp)
         )
 
         RequirementRow(
@@ -155,7 +208,7 @@ fun RequirementsScreen() {
         )
 
         Spacer(
-            modifier = Modifier.height(32.dp)
+            modifier = Modifier.height(24.dp)
         )
 
         if (!permissionsGranted) {
@@ -172,7 +225,7 @@ fun RequirementsScreen() {
             }
 
             Spacer(
-                modifier = Modifier.height(12.dp)
+                modifier = Modifier.height(8.dp)
             )
         }
 
@@ -192,7 +245,7 @@ fun RequirementsScreen() {
             }
 
             Spacer(
-                modifier = Modifier.height(12.dp)
+                modifier = Modifier.height(8.dp)
             )
         }
 
@@ -211,24 +264,106 @@ fun RequirementsScreen() {
             }
 
             Spacer(
-                modifier = Modifier.height(12.dp)
+                modifier = Modifier.height(8.dp)
             )
         }
 
-        Spacer(
-            modifier = Modifier.height(20.dp)
-        )
-
         if (ready) {
+
             Text(
                 text = "Ready for RESCUEMESH",
-                style = MaterialTheme.typography.headlineSmall
+                style = MaterialTheme.typography.titleMedium
             )
-        } else {
+
+            Spacer(
+                modifier = Modifier.height(20.dp)
+            )
+
+            Button(
+                onClick = {
+                    advertiser.startAdvertising()
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Start Advertising")
+            }
+
+            Spacer(
+                modifier = Modifier.height(8.dp)
+            )
+
+            Button(
+                onClick = {
+                    advertiser.stopAdvertising()
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Stop Advertising")
+            }
+
+            Spacer(
+                modifier = Modifier.height(12.dp)
+            )
+
             Text(
-                text = "Complete the requirements above.",
-                style = MaterialTheme.typography.bodyLarge
+                text = "Advertiser: $advertiserStatus"
             )
+
+            Spacer(
+                modifier = Modifier.height(20.dp)
+            )
+
+            Button(
+                onClick = {
+                    foundDevice = null
+                    foundRssi = null
+
+                    scanner.startScanning()
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Start Scanning")
+            }
+
+            Spacer(
+                modifier = Modifier.height(8.dp)
+            )
+
+            Button(
+                onClick = {
+                    scanner.stopScanning()
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Stop Scanning")
+            }
+
+            Spacer(
+                modifier = Modifier.height(12.dp)
+            )
+
+            Text(
+                text = "Scanner: $scannerStatus"
+            )
+
+            foundDevice?.let { address ->
+
+                Spacer(
+                    modifier = Modifier.height(12.dp)
+                )
+
+                Text(
+                    text = "Found RESCUEMESH device"
+                )
+
+                Text(
+                    text = "Address: $address"
+                )
+
+                Text(
+                    text = "RSSI: ${foundRssi ?: "?"} dBm"
+                )
+            }
         }
     }
 }
@@ -242,7 +377,7 @@ private fun RequirementRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp)
+            .padding(vertical = 4.dp)
     ) {
 
         Text(
