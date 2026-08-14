@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "SaharaGateway (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "SaharaGateway (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
