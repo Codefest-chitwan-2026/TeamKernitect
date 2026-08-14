@@ -5,25 +5,16 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import com.kernitect.saharaandroid.ble.AppRequirements
 import com.kernitect.saharaandroid.location.LocationProvider
 import com.kernitect.saharaandroid.mesh.MeshEngine
-import com.kernitect.saharaandroid.model.RescuePacket
+import com.kernitect.saharaandroid.ui.SaharaApp
 import com.kernitect.saharaandroid.ui.theme.SaharaAndroidTheme
 
 class MainActivity : ComponentActivity() {
@@ -31,109 +22,80 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(
         savedInstanceState: Bundle?
     ) {
-
-        super.onCreate(
-            savedInstanceState
-        )
+        super.onCreate(savedInstanceState)
 
         setContent {
 
             SaharaAndroidTheme {
 
+                /*
+                 * We keep these states here so later
+                 * the real UI can display things like:
+                 *
+                 * - Getting location
+                 * - SOS sent
+                 * - SOS received
+                 * - Mesh connected
+                 * - Error
+                 */
                 var status by remember {
-                    mutableStateOf(
-                        "Starting..."
-                    )
-                }
-
-                var locationStatus by remember {
-                    mutableStateOf(
-                        "Location not requested"
-                    )
-                }
-
-                var latitude by remember {
-                    mutableStateOf<Double?>(
-                        null
-                    )
-                }
-
-                var longitude by remember {
-                    mutableStateOf<Double?>(
-                        null
-                    )
-                }
-
-                var accuracy by remember {
-                    mutableStateOf<Float?>(
-                        null
-                    )
+                    mutableStateOf("Starting...")
                 }
 
                 var gettingLocation by remember {
-                    mutableStateOf(
-                        false
-                    )
-                }
-
-                var lastReceivedPacket by remember {
-                    mutableStateOf<RescuePacket?>(
-                        null
-                    )
-                }
-
-                var lastSentPacket by remember {
-                    mutableStateOf<RescuePacket?>(
-                        null
-                    )
+                    mutableStateOf(false)
                 }
 
                 var permissionsGranted by remember {
                     mutableStateOf(
-                        AppRequirements
-                            .hasAllRuntimePermissions(
-                                this
-                            )
+                        AppRequirements.hasAllRuntimePermissions(
+                            this@MainActivity
+                        )
                     )
                 }
 
-                val locationProvider =
-                    remember {
+                /*
+                 * Existing GPS provider.
+                 */
+                val locationProvider = remember {
 
-                        LocationProvider(
-                            context = this
-                        )
-                    }
+                    LocationProvider(
+                        context = this@MainActivity
+                    )
+                }
 
-                val meshEngine =
-                    remember {
+                /*
+                 * Existing working RESCUEMESH engine.
+                 *
+                 * BLE / GATT / relay logic is unchanged.
+                 */
+                val meshEngine = remember {
 
-                        MeshEngine(
-                            context = this,
+                    MeshEngine(
+                        context = this@MainActivity,
 
-                            onStatusChanged = {
-                                    newStatus ->
+                        onStatusChanged = { newStatus ->
 
-                                status =
-                                    newStatus
-                            },
+                            status = newStatus
+                        },
 
-                            onPacketReceived = {
-                                    packet ->
+                        onPacketReceived = { packet ->
 
-                                lastReceivedPacket =
-                                    packet
-                            },
+                            status =
+                                "SOS received - Hop ${packet.hopCount}/${packet.ttl}"
+                        },
 
-                            onPacketSent = {
-                                    packet ->
+                        onPacketSent = { packet ->
 
-                                lastSentPacket =
-                                    packet
-                            }
-                        )
-                    }
+                            status =
+                                "SOS sent - Hop ${packet.hopCount}/${packet.ttl}"
+                        }
+                    )
+                }
 
+                /*
+                 * Permission launcher.
+                 */
                 val permissionLauncher =
                     rememberLauncherForActivityResult(
                         contract =
@@ -144,12 +106,13 @@ class MainActivity : ComponentActivity() {
                         permissionsGranted =
                             AppRequirements
                                 .hasAllRuntimePermissions(
-                                    this
+                                    this@MainActivity
                                 )
                     }
 
                 /*
-                 * Ask for required permissions.
+                 * Ask for the required permissions
+                 * when the app starts.
                  */
                 LaunchedEffect(Unit) {
 
@@ -163,8 +126,8 @@ class MainActivity : ComponentActivity() {
                 }
 
                 /*
-                 * Start BLE mesh once permissions
-                 * are available.
+                 * Start the BLE mesh after all
+                 * required permissions are available.
                  */
                 LaunchedEffect(
                     permissionsGranted
@@ -173,20 +136,18 @@ class MainActivity : ComponentActivity() {
                     if (permissionsGranted) {
 
                         if (
-                            !AppRequirements
-                                .hasPreciseLocation(
-                                    this@MainActivity
-                                )
+                            !AppRequirements.hasPreciseLocation(
+                                this@MainActivity
+                            )
                         ) {
 
                             status =
                                 "Precise location permission required"
 
                         } else if (
-                            !AppRequirements
-                                .isLocationServicesEnabled(
-                                    this@MainActivity
-                                )
+                            !AppRequirements.isLocationServicesEnabled(
+                                this@MainActivity
+                            )
                         ) {
 
                             status =
@@ -204,6 +165,10 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                /*
+                 * Shut down BLE resources when
+                 * this Compose hierarchy is destroyed.
+                 */
                 DisposableEffect(Unit) {
 
                     onDispose {
@@ -212,123 +177,83 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                Column(
-                    modifier =
-                        Modifier
-                            .fillMaxSize()
-                            .padding(
-                                24.dp
-                            ),
-
-                    verticalArrangement =
-                        Arrangement.spacedBy(
-                            12.dp
-                        )
-                ) {
-
-                    Text(
-                        text =
-                            "SAHARA DEBUG",
-
-                        style =
-                            MaterialTheme
-                                .typography
-                                .headlineMedium
-                    )
-
-                    Text(
-                        text =
-                            "Mesh Status:"
-                    )
-
-                    Text(
-                        text =
-                            status
-                    )
-
-                    Text(
-                        text =
-                            "Location:"
-                    )
-
-                    Text(
-                        text =
-                            locationStatus
-                    )
+                /*
+                 * NEW SAHARA UI
+                 */
+                SaharaApp(
 
                     /*
-                     * REAL SOS BUTTON
+                     * BIG RED SOS BUTTON
+                     *
+                     * This is the CRITICAL emergency action.
                      */
-                    Button(
-                        enabled =
-                            permissionsGranted &&
-                                    !gettingLocation,
+                    onCriticalSos = {
 
-                        onClick = {
+                        /*
+                         * Prevent multiple simultaneous
+                         * GPS requests if SOS is tapped
+                         * repeatedly.
+                         */
+                        if (!gettingLocation) {
 
                             if (
-                                !AppRequirements
-                                    .hasPreciseLocation(
-                                        this@MainActivity
-                                    )
+                                !permissionsGranted
                             ) {
 
-                                locationStatus =
+                                status =
+                                    "Required permissions not granted"
+
+                            } else if (
+                                !AppRequirements.hasPreciseLocation(
+                                    this@MainActivity
+                                )
+                            ) {
+
+                                status =
                                     "Precise location permission required"
 
-                                return@Button
-                            }
-
-                            if (
-                                !AppRequirements
-                                    .isLocationServicesEnabled(
-                                        this@MainActivity
-                                    )
+                            } else if (
+                                !AppRequirements.isLocationServicesEnabled(
+                                    this@MainActivity
+                                )
                             ) {
 
-                                locationStatus =
+                                status =
                                     "Turn on Location services"
 
-                                return@Button
-                            }
+                            } else {
 
-                            gettingLocation =
-                                true
+                                gettingLocation = true
 
-                            locationStatus =
-                                "Getting accurate GPS location..."
+                                status =
+                                    "Getting accurate GPS location..."
 
-                            /*
-                             * Get fresh GPS FIRST.
-                             *
-                             * Only create the SOS packet
-                             * after we have an acceptable fix.
-                             */
-                            locationProvider
-                                .getCurrentLocation(
+                                /*
+                                 * Same GPS logic that already worked
+                                 * in the debug UI.
+                                 */
+                                locationProvider.getCurrentLocation(
 
-                                    onSuccess = {
-                                            location ->
+                                    onSuccess = { location ->
 
-                                        gettingLocation =
-                                            false
+                                        gettingLocation = false
 
-                                        latitude =
-                                            location.latitude
-
-                                        longitude =
-                                            location.longitude
-
-                                        accuracy =
-                                            location.accuracy
-
-                                        locationStatus =
+                                        status =
                                             "GPS acquired: " +
-                                                    "${location.accuracy.toInt()} m accuracy"
+                                                    "${location.accuracy.toInt()} m"
 
                                         /*
-                                         * THIS is where the real
-                                         * SOS packet is created.
+                                         * Same working SOS creation.
+                                         *
+                                         * GPS
+                                         * ↓
+                                         * MeshEngine
+                                         * ↓
+                                         * Android relay
+                                         * ↓
+                                         * Windows
+                                         * ↓
+                                         * FastAPI
                                          */
                                         meshEngine.originateSos(
                                             latitude =
@@ -339,100 +264,17 @@ class MainActivity : ComponentActivity() {
                                         )
                                     },
 
-                                    onError = {
-                                            error ->
+                                    onError = { error ->
 
-                                        gettingLocation =
-                                            false
+                                        gettingLocation = false
 
-                                        locationStatus =
-                                            error
+                                        status = error
                                     }
                                 )
-                        }
-                    ) {
-
-                        Text(
-                            if (gettingLocation) {
-                                "GETTING LOCATION..."
-                            } else {
-                                "SEND SOS"
                             }
-                        )
-                    }
-
-                    Button(
-                        enabled =
-                            permissionsGranted,
-
-                        onClick = {
-
-                            meshEngine
-                                .retryPendingForward()
                         }
-                    ) {
-
-                        Text(
-                            "RETRY PENDING"
-                        )
                     }
-
-                    /*
-                     * Show real GPS data.
-                     */
-                    latitude?.let {
-                            lat ->
-
-                        Text(
-                            text =
-                                "Latitude: $lat"
-                        )
-                    }
-
-                    longitude?.let {
-                            lng ->
-
-                        Text(
-                            text =
-                                "Longitude: $lng"
-                        )
-                    }
-
-                    accuracy?.let {
-                            acc ->
-
-                        Text(
-                            text =
-                                "Accuracy: ${acc.toInt()} m"
-                        )
-                    }
-
-                    lastReceivedPacket?.let {
-                            packet ->
-
-                        Text(
-                            text =
-                                "Received SOS:\n" +
-                                        "ID: ${packet.id}\n" +
-                                        "Hop: ${packet.hopCount}/${packet.ttl}\n" +
-                                        "Latitude: ${packet.latitude}\n" +
-                                        "Longitude: ${packet.longitude}"
-                        )
-                    }
-
-                    lastSentPacket?.let {
-                            packet ->
-
-                        Text(
-                            text =
-                                "Sent SOS:\n" +
-                                        "ID: ${packet.id}\n" +
-                                        "Hop: ${packet.hopCount}/${packet.ttl}\n" +
-                                        "Latitude: ${packet.latitude}\n" +
-                                        "Longitude: ${packet.longitude}"
-                        )
-                    }
-                }
+                )
             }
         }
     }
