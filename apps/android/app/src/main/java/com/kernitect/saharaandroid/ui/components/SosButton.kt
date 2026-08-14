@@ -24,24 +24,28 @@ fun SosButton(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
+
         Button(
             onClick = onClick,
             modifier = Modifier.size(76.dp),
             shape = CircleShape,
+
             colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFFE60000),
-                contentColor = Color.White
+                containerColor = Color(0xFFFF0000),
+                contentColor = Color.Black
             ),
+
             border = BorderStroke(
                 width = 4.dp,
                 color = Color.White
-            ),
-            contentPadding = ButtonDefaults.ContentPadding
+            )
         ) {
+
             Text(
                 text = "SOS",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.ExtraBold
+                fontSize = 21.sp,
+                fontWeight = FontWeight.Black,
+                color = Color.Black
             )
         }
     }

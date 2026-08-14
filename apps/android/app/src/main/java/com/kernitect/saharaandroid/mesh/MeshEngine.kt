@@ -292,13 +292,18 @@ class MeshEngine(
         )
     }
 
+    /*
+     * CRITICAL emergency.
+     *
+     * Called by the large red SOS button.
+     */
     fun originateSos(
         latitude: Double,
         longitude: Double
     ): RescuePacket {
 
         val packet =
-            RescuePacket.createSos(
+            RescuePacket.createCriticalSos(
                 latitude = latitude,
                 longitude = longitude
             )
@@ -313,13 +318,65 @@ class MeshEngine(
 
         Log.d(
             TAG,
-            "Created SOS ${packet.id}"
+            "Created CRITICAL SOS ${packet.id}"
         )
 
         postStatus(
-            "SOS created. Looking for Android relay first..."
+            "Critical SOS created. Looking for Android relay first..."
         )
 
+        beginForward(
+            packet = packet,
+            sourceAddress = null
+        )
+
+        return packet
+    }
+
+    /*
+     * NORMAL help request.
+     *
+     * Called by the form in the middle
+     * of the Home screen.
+     */
+    fun originateHelpRequest(
+        latitude: Double,
+        longitude: Double,
+        disasterType: String,
+        peopleCount: String,
+        explanation: String
+    ): RescuePacket {
+
+        val packet =
+            RescuePacket.createHelpRequest(
+                latitude = latitude,
+                longitude = longitude,
+                disasterType = disasterType,
+                peopleCount = peopleCount,
+                explanation = explanation
+            )
+
+        /*
+         * Mark our own packet as seen so that
+         * it is ignored if it loops back.
+         */
+        relayManager.markSeen(
+            packet.id
+        )
+
+        Log.d(
+            TAG,
+            "Created NORMAL help request ${packet.id}"
+        )
+
+        postStatus(
+            "Help request created. Looking for Android relay first..."
+        )
+
+        /*
+         * Uses the exact same proven BLE
+         * forwarding path as critical SOS.
+         */
         beginForward(
             packet = packet,
             sourceAddress = null
@@ -362,6 +419,48 @@ class MeshEngine(
         )
 
         startPreferredScan()
+    }
+
+    fun cancelPendingForward() {
+
+        cancelScanTimers()
+
+        scanner.stopScanning()
+
+        gattClient.close()
+
+        pendingPacket =
+            null
+
+        sendingPacket =
+            null
+
+        excludedAddress =
+            null
+
+        sendingAddress =
+            null
+
+        scanPhase =
+            null
+
+        /*
+         * If we stopped advertising while preparing
+         * a forward, make the node visible again.
+         */
+        if (started) {
+
+            advertiser.startAdvertising()
+        }
+
+        postStatus(
+            "Pending request cancelled"
+        )
+
+        Log.d(
+            TAG,
+            "Pending request cancelled"
+        )
     }
 
     private fun handleIncomingMessage(
@@ -420,12 +519,14 @@ class MeshEngine(
         Log.d(
             TAG,
             "Received packet=${packet.id} " +
+                    "priority=${packet.priority} " +
                     "hop=${packet.hopCount} " +
                     "source=$sourceAddress"
         )
 
         postStatus(
-            "Received SOS ${packet.id.take(8)} at hop ${packet.hopCount}"
+            "Received ${packet.priority} request ${packet.id.take(8)} " +
+                    "at hop ${packet.hopCount}"
         )
 
         if (!packet.canRelay()) {
@@ -482,6 +583,7 @@ class MeshEngine(
         Log.d(
             TAG,
             "beginForward packet=${packet.id} " +
+                    "priority=${packet.priority} " +
                     "hop=${packet.hopCount}"
         )
 
@@ -688,6 +790,7 @@ class MeshEngine(
         Log.d(
             TAG,
             "SUCCESS packet=${packet.id} " +
+                    "priority=${packet.priority} " +
                     "hop=${packet.hopCount} " +
                     "destination=$destination"
         )
@@ -718,7 +821,8 @@ class MeshEngine(
         )
 
         postStatus(
-            "Packet ${packet.id.take(8)} sent successfully at hop ${packet.hopCount}"
+            "${packet.priority} request ${packet.id.take(8)} " +
+                    "sent successfully at hop ${packet.hopCount}"
         )
     }
 
@@ -730,7 +834,7 @@ class MeshEngine(
         )
 
         postStatus(
-            "Forwarding SOS. Hiding this node from further relay scans."
+            "Forwarding request. Hiding this node from further relay scans."
         )
 
         advertiser.stopAdvertising()

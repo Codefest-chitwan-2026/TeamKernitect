@@ -21,52 +21,104 @@ namespace SaharaGateway.Services
             };
         }
 
-        public async Task<string> SendSosAsync(string rawBleJson)
+        public async Task<string> SendSosAsync(
+            string rawBleJson
+        )
         {
             try
             {
-                // Parse the packet received from Android over BLE
+                /*
+                 * Parse the packet received
+                 * from Android over BLE.
+                 */
                 using JsonDocument document =
-                    JsonDocument.Parse(rawBleJson);
+                    JsonDocument.Parse(
+                        rawBleJson
+                    );
 
-                JsonElement root = document.RootElement;
+                JsonElement root =
+                    document.RootElement;
 
                 string id =
-                    root.GetProperty("id").GetString() ?? "";
+                    root.GetProperty("id")
+                        .GetString()
+                    ?? "";
 
                 double latitude =
-                    root.GetProperty("latitude").GetDouble();
+                    root.GetProperty("latitude")
+                        .GetDouble();
 
                 double longitude =
-                    root.GetProperty("longitude").GetDouble();
+                    root.GetProperty("longitude")
+                        .GetDouble();
 
                 long timestamp =
-                    root.GetProperty("timestamp").GetInt64();
+                    root.GetProperty("timestamp")
+                        .GetInt64();
 
                 int hopCount =
-                    root.GetProperty("hopCount").GetInt32();
+                    root.GetProperty("hopCount")
+                        .GetInt32();
 
                 int ttl =
-                    root.GetProperty("ttl").GetInt32();
+                    root.GetProperty("ttl")
+                        .GetInt32();
 
-                // Convert RESCUEMESH BLE packet
-                // into the format expected by FastAPI
+                /*
+                 * New fields coming from Android.
+                 *
+                 * Fallback values make Windows
+                 * compatible with older packets too.
+                 */
+                string priority =
+                    root.TryGetProperty(
+                        "priority",
+                        out JsonElement priorityElement
+                    )
+                        ? priorityElement.GetString()
+                            ?? "CRITICAL"
+                        : "CRITICAL";
+
+                string message =
+                    root.TryGetProperty(
+                        "message",
+                        out JsonElement messageElement
+                    )
+                        ? messageElement.GetString()
+                            ?? "SOS received via RESCUEMESH"
+                        : "SOS received via RESCUEMESH";
+
+                /*
+                 * Convert BLE packet into
+                 * FastAPI's expected model.
+                 */
                 var apiPacket = new
                 {
                     id = id,
+
                     revision = 1,
+
                     type = "EMERGENCY",
+
                     latitude = latitude,
+
                     longitude = longitude,
-                    message = "SOS received via RESCUEMESH",
+
+                    message = message,
+
                     timestamp = timestamp,
+
                     hopCount = hopCount,
+
                     maxHops = ttl,
-                    priority = "CRITICAL"
+
+                    priority = priority
                 };
 
                 string apiJson =
-                    JsonSerializer.Serialize(apiPacket);
+                    JsonSerializer.Serialize(
+                        apiPacket
+                    );
 
                 using var content =
                     new StringContent(
@@ -82,18 +134,21 @@ namespace SaharaGateway.Services
                     );
 
                 string responseBody =
-                    await response.Content.ReadAsStringAsync();
+                    await response.Content
+                        .ReadAsStringAsync();
 
                 if (response.IsSuccessStatusCode)
                 {
                     return
                         $"SUCCESS\n" +
+                        $"Priority: {priority}\n" +
                         $"HTTP {(int)response.StatusCode}\n" +
                         responseBody;
                 }
 
                 return
                     $"FAILED\n" +
+                    $"Priority: {priority}\n" +
                     $"HTTP {(int)response.StatusCode}\n" +
                     responseBody;
             }

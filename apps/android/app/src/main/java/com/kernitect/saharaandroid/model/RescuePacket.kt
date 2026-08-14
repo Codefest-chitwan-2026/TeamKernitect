@@ -10,22 +10,16 @@ data class RescuePacket(
     val longitude: Double,
     val timestamp: Long,
     val hopCount: Int,
-    val ttl: Int
+    val ttl: Int,
+    val priority: String,
+    val message: String
 ) {
 
-    fun toJson(): String {
+    fun toJson(): String =
+        JSONObject().apply {
 
-        return JSONObject().apply {
-
-            put(
-                "id",
-                id
-            )
-
-            put(
-                "type",
-                type
-            )
+            put("id", id)
+            put("type", type)
 
             put(
                 "latitude",
@@ -52,33 +46,48 @@ data class RescuePacket(
                 ttl
             )
 
+            put(
+                "priority",
+                priority
+            )
+
+            put(
+                "message",
+                message
+            )
+
         }.toString()
-    }
 
-    fun canRelay():
-            Boolean {
+    fun canRelay(): Boolean =
+        hopCount < ttl
 
-        return hopCount < ttl
-    }
-
-    fun nextHop():
-            RescuePacket {
-
-        return copy(
+    fun nextHop(): RescuePacket =
+        copy(
             hopCount =
                 hopCount + 1
         )
-    }
 
     companion object {
 
         const val TYPE_SOS =
             "SOS"
 
+        const val PRIORITY_NORMAL =
+            "NORMAL"
+
+        const val PRIORITY_HIGH =
+            "HIGH"
+
+        const val PRIORITY_CRITICAL =
+            "CRITICAL"
+
         const val DEFAULT_TTL =
             5
 
-        fun createSos(
+        /*
+         * Big red SOS button.
+         */
+        fun createCriticalSos(
             latitude: Double,
             longitude: Double
         ): RescuePacket {
@@ -104,7 +113,79 @@ data class RescuePacket(
                     0,
 
                 ttl =
-                    DEFAULT_TTL
+                    DEFAULT_TTL,
+
+                priority =
+                    PRIORITY_CRITICAL,
+
+                message =
+                    "Critical emergency SOS"
+            )
+        }
+
+        /*
+         * Non-emergency help form.
+         */
+        fun createHelpRequest(
+            latitude: Double,
+            longitude: Double,
+            disasterType: String,
+            peopleCount: String,
+            explanation: String
+        ): RescuePacket {
+
+            val messageParts =
+                mutableListOf<String>()
+
+            messageParts.add(
+                disasterType
+            )
+
+            messageParts.add(
+                "People: $peopleCount"
+            )
+
+            if (
+                explanation
+                    .isNotBlank()
+            ) {
+
+                messageParts.add(
+                    explanation.trim()
+                )
+            }
+
+            return RescuePacket(
+                id =
+                    UUID.randomUUID()
+                        .toString(),
+
+                type =
+                    TYPE_SOS,
+
+                latitude =
+                    latitude,
+
+                longitude =
+                    longitude,
+
+                timestamp =
+                    System.currentTimeMillis(),
+
+                hopCount =
+                    0,
+
+                ttl =
+                    DEFAULT_TTL,
+
+                priority =
+                    PRIORITY_NORMAL,
+
+                message =
+                    messageParts
+                        .joinToString(
+                            separator = " | "
+                        )
             )
         }
 
@@ -153,6 +234,23 @@ data class RescuePacket(
                     ttl =
                         obj.getInt(
                             "ttl"
+                        ),
+
+                    /*
+                     * Defaults make this compatible
+                     * with any older packets that
+                     * don't contain these fields.
+                     */
+                    priority =
+                        obj.optString(
+                            "priority",
+                            PRIORITY_CRITICAL
+                        ),
+
+                    message =
+                        obj.optString(
+                            "message",
+                            "Critical emergency SOS"
                         )
                 )
 
