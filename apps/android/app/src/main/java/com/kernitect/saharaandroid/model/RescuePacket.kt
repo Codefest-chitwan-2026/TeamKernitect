@@ -14,31 +14,69 @@ data class RescuePacket(
 ) {
 
     fun toJson(): String {
+
         return JSONObject().apply {
-            put("id", id)
-            put("type", type)
-            put("latitude", latitude)
-            put("longitude", longitude)
-            put("timestamp", timestamp)
-            put("hopCount", hopCount)
-            put("ttl", ttl)
+
+            put(
+                "id",
+                id
+            )
+
+            put(
+                "type",
+                type
+            )
+
+            put(
+                "latitude",
+                latitude
+            )
+
+            put(
+                "longitude",
+                longitude
+            )
+
+            put(
+                "timestamp",
+                timestamp
+            )
+
+            put(
+                "hopCount",
+                hopCount
+            )
+
+            put(
+                "ttl",
+                ttl
+            )
+
         }.toString()
     }
 
-    fun canRelay(): Boolean {
+    fun canRelay():
+            Boolean {
+
         return hopCount < ttl
     }
 
-    fun nextHop(): RescuePacket {
+    fun nextHop():
+            RescuePacket {
+
         return copy(
-            hopCount = hopCount + 1
+            hopCount =
+                hopCount + 1
         )
     }
 
     companion object {
 
-        const val TYPE_SOS = "SOS"
-        const val DEFAULT_TTL = 5
+        const val TYPE_SOS =
+            "SOS"
+
+        const val DEFAULT_TTL =
+            5
 
         fun createSos(
             latitude: Double,
@@ -46,13 +84,27 @@ data class RescuePacket(
         ): RescuePacket {
 
             return RescuePacket(
-                id = UUID.randomUUID().toString(),
-                type = TYPE_SOS,
-                latitude = latitude,
-                longitude = longitude,
-                timestamp = System.currentTimeMillis(),
-                hopCount = 0,
-                ttl = DEFAULT_TTL
+                id =
+                    UUID.randomUUID()
+                        .toString(),
+
+                type =
+                    TYPE_SOS,
+
+                latitude =
+                    latitude,
+
+                longitude =
+                    longitude,
+
+                timestamp =
+                    System.currentTimeMillis(),
+
+                hopCount =
+                    0,
+
+                ttl =
+                    DEFAULT_TTL
             )
         }
 
@@ -63,16 +115,45 @@ data class RescuePacket(
             return try {
 
                 val obj =
-                    JSONObject(json)
+                    JSONObject(
+                        json
+                    )
 
                 RescuePacket(
-                    id = obj.getString("id"),
-                    type = obj.getString("type"),
-                    latitude = obj.getDouble("latitude"),
-                    longitude = obj.getDouble("longitude"),
-                    timestamp = obj.getLong("timestamp"),
-                    hopCount = obj.getInt("hopCount"),
-                    ttl = obj.getInt("ttl")
+                    id =
+                        obj.getString(
+                            "id"
+                        ),
+
+                    type =
+                        obj.getString(
+                            "type"
+                        ),
+
+                    latitude =
+                        obj.getDouble(
+                            "latitude"
+                        ),
+
+                    longitude =
+                        obj.getDouble(
+                            "longitude"
+                        ),
+
+                    timestamp =
+                        obj.getLong(
+                            "timestamp"
+                        ),
+
+                    hopCount =
+                        obj.getInt(
+                            "hopCount"
+                        ),
+
+                    ttl =
+                        obj.getInt(
+                            "ttl"
+                        )
                 )
 
             } catch (_: Exception) {

@@ -1,9 +1,11 @@
 package com.kernitect.saharaandroid.mesh
 
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import com.kernitect.saharaandroid.ble.BleAdvertiser
 import com.kernitect.saharaandroid.ble.BleGattClient
 import com.kernitect.saharaandroid.ble.BleGattServer
@@ -23,6 +25,25 @@ class MeshEngine(
         (RescuePacket) -> Unit
 ) {
 
+    companion object {
+
+        private const val TAG =
+            "SAHARA_MESH"
+
+        private const val ANDROID_SCAN_MS =
+            3_000L
+
+        private const val FALLBACK_SCAN_MS =
+            12_000L
+    }
+
+    private enum class ScanPhase {
+
+        ANDROID_PREFERRED,
+
+        ANY_RESCUEMESH
+    }
+
     private val appContext =
         context.applicationContext
 
@@ -37,25 +58,30 @@ class MeshEngine(
     private var started =
         false
 
+    /*
+     * Packet stays here until successful write.
+     */
     private var pendingPacket:
             RescuePacket? = null
 
+    /*
+     * Non-null while sending.
+     */
     private var sendingPacket:
             RescuePacket? = null
 
-    private var excludedDevice:
-            BluetoothDevice? = null
-
-    companion object {
-
-        private const val SCAN_TIMEOUT_MS =
-            15_000L
-    }
-
     /*
-     * Advertisement is created before the server
-     * because the server's onReady callback uses it.
+     * Extra safeguard against immediate loopback.
      */
+    private var excludedAddress:
+            String? = null
+
+    private var sendingAddress:
+            String? = null
+
+    private var scanPhase:
+            ScanPhase? = null
+
     private val advertiser =
         BleAdvertiser(
             context = appContext,
@@ -76,10 +102,13 @@ class MeshEngine(
                     device,
                     rssi ->
 
-                handleDeviceFound(
-                    device = device,
-                    rssi = rssi
-                )
+                mainHandler.post {
+
+                    handleDeviceFound(
+                        device = device,
+                        rssi = rssi
+                    )
+                }
             },
 
             onStatusChanged = { status ->
@@ -103,25 +132,10 @@ class MeshEngine(
 
             onMessageSent = {
 
-                val packet =
-                    sendingPacket
+                mainHandler.post {
 
-                if (packet != null) {
-
-                    mainHandler.post {
-
-                        onPacketSent(
-                            packet
-                        )
-                    }
-
-                    postStatus(
-                        "Packet ${packet.id.take(8)} sent at hop ${packet.hopCount}"
-                    )
+                    handleSendSuccess()
                 }
-
-                sendingPacket =
-                    null
             }
         )
 
@@ -133,13 +147,13 @@ class MeshEngine(
                     device,
                     message ->
 
-                handleIncomingMessage(
-                    sourceDevice =
-                        device,
+                mainHandler.post {
 
-                    rawMessage =
-                        message
-                )
+                    handleIncomingMessage(
+                        sourceDevice = device,
+                        rawMessage = message
+                    )
+                }
             },
 
             onStatusChanged = { status ->
@@ -151,25 +165,80 @@ class MeshEngine(
 
             onReady = {
 
-                postStatus(
-                    "GATT ready. Starting advertisement..."
-                )
+                mainHandler.post {
 
-                advertiser.startAdvertising()
+                    postStatus(
+                        "GATT ready. Starting advertisement..."
+                    )
+
+                    advertiser.startAdvertising()
+                }
             }
         )
 
-    private val scanTimeoutRunnable =
+    /*
+     * Phase 1 timeout.
+     *
+     * No Android phone found → try gateway.
+     */
+    private val androidScanTimeoutRunnable =
         Runnable {
 
-            if (pendingPacket != null) {
+            if (
+                pendingPacket == null ||
+                sendingPacket != null ||
+                scanPhase !=
+                ScanPhase.ANDROID_PREFERRED
+            ) {
 
-                scanner.stopScanning()
-
-                postStatus(
-                    "No next relay found within 15 seconds"
-                )
+                return@Runnable
             }
+
+            scanner.stopScanning()
+
+            Log.d(
+                TAG,
+                "No Android relay. Falling back to gateway."
+            )
+
+            postStatus(
+                "No Android relay found. Looking for gateway..."
+            )
+
+            startFallbackScan()
+        }
+
+    /*
+     * Phase 2 timeout.
+     *
+     * Keep packet so Retry still works.
+     */
+    private val fallbackScanTimeoutRunnable =
+        Runnable {
+
+            if (
+                pendingPacket == null ||
+                sendingPacket != null ||
+                scanPhase !=
+                ScanPhase.ANY_RESCUEMESH
+            ) {
+
+                return@Runnable
+            }
+
+            scanner.stopScanning()
+
+            scanPhase =
+                null
+
+            postStatus(
+                "No next relay found. Packet kept for retry."
+            )
+
+            Log.d(
+                TAG,
+                "No destination. Packet retained."
+            )
         }
 
     fun start() {
@@ -190,9 +259,7 @@ class MeshEngine(
 
     fun stop() {
 
-        mainHandler.removeCallbacks(
-            scanTimeoutRunnable
-        )
+        cancelScanTimers()
 
         scanner.stopScanning()
 
@@ -208,7 +275,13 @@ class MeshEngine(
         sendingPacket =
             null
 
-        excludedDevice =
+        excludedAddress =
+            null
+
+        sendingAddress =
+            null
+
+        scanPhase =
             null
 
         started =
@@ -231,20 +304,25 @@ class MeshEngine(
             )
 
         /*
-         * Mark our own packet as seen so that if it
-         * eventually loops back to us, it is ignored.
+         * If the packet eventually loops back,
+         * the origin ignores it.
          */
         relayManager.markSeen(
             packet.id
         )
 
+        Log.d(
+            TAG,
+            "Created SOS ${packet.id}"
+        )
+
         postStatus(
-            "SOS created. Looking for first relay..."
+            "SOS created. Looking for Android relay first..."
         )
 
         beginForward(
             packet = packet,
-            sourceDevice = null
+            sourceAddress = null
         )
 
         return packet
@@ -264,17 +342,37 @@ class MeshEngine(
             return
         }
 
+        gattClient.close()
+
+        scanner.stopScanning()
+
+        cancelScanTimers()
+
+        sendingPacket =
+            null
+
+        sendingAddress =
+            null
+
+        scanPhase =
+            null
+
         postStatus(
-            "Retrying relay scan..."
+            "Retrying packet ${packet.id.take(8)} at hop ${packet.hopCount}..."
         )
 
-        startRelayScan()
+        startPreferredScan()
     }
 
     private fun handleIncomingMessage(
         sourceDevice: BluetoothDevice,
         rawMessage: String
     ) {
+
+        val sourceAddress =
+            safeAddress(
+                sourceDevice
+            )
 
         val packet =
             RescuePacket.fromJson(
@@ -302,12 +400,11 @@ class MeshEngine(
             return
         }
 
-        val isNewPacket =
-            relayManager.markSeen(
+        if (
+            !relayManager.markSeen(
                 packet.id
             )
-
-        if (!isNewPacket) {
+        ) {
 
             postStatus(
                 "Duplicate SOS ${packet.id.take(8)} ignored"
@@ -316,12 +413,16 @@ class MeshEngine(
             return
         }
 
-        mainHandler.post {
+        onPacketReceived(
+            packet
+        )
 
-            onPacketReceived(
-                packet
-            )
-        }
+        Log.d(
+            TAG,
+            "Received packet=${packet.id} " +
+                    "hop=${packet.hopCount} " +
+                    "source=$sourceAddress"
+        )
 
         postStatus(
             "Received SOS ${packet.id.take(8)} at hop ${packet.hopCount}"
@@ -336,64 +437,140 @@ class MeshEngine(
             return
         }
 
+        /*
+         * Increment exactly once.
+         *
+         * Retry does not increment again.
+         */
         val nextPacket =
             packet.nextHop()
 
         postStatus(
-            "Relaying as hop ${nextPacket.hopCount}/${nextPacket.ttl}"
+            "Preparing hop ${nextPacket.hopCount}/${nextPacket.ttl}"
         )
 
         beginForward(
-            packet =
-                nextPacket,
-
-            sourceDevice =
-                sourceDevice
+            packet = nextPacket,
+            sourceAddress = sourceAddress
         )
     }
 
     private fun beginForward(
         packet: RescuePacket,
-        sourceDevice: BluetoothDevice?
+        sourceAddress: String?
     ) {
 
-        /*
-         * Replace any previous pending forwarding job.
-         */
-        mainHandler.removeCallbacks(
-            scanTimeoutRunnable
-        )
+        cancelScanTimers()
 
         scanner.stopScanning()
 
         pendingPacket =
             packet
 
-        excludedDevice =
-            sourceDevice
+        sendingPacket =
+            null
 
-        startRelayScan()
+        sendingAddress =
+            null
+
+        excludedAddress =
+            sourceAddress
+
+        scanPhase =
+            null
+
+        Log.d(
+            TAG,
+            "beginForward packet=${packet.id} " +
+                    "hop=${packet.hopCount}"
+        )
+
+        startPreferredScan()
     }
 
-    private fun startRelayScan() {
+    /*
+     * PHASE 1
+     *
+     * Prefer Android.
+     */
+    private fun startPreferredScan() {
 
-        if (pendingPacket == null) {
+        val packet =
+            pendingPacket
+                ?: return
+
+        if (
+            sendingPacket != null
+        ) {
             return
         }
 
-        mainHandler.removeCallbacks(
-            scanTimeoutRunnable
-        )
+        cancelScanTimers()
 
-        scanner.startScanning()
+        scanner.stopScanning()
+
+        scanPhase =
+            ScanPhase.ANDROID_PREFERRED
 
         postStatus(
-            "Scanning for next RESCUEMESH node..."
+            "Looking for nearby Android relay..."
+        )
+
+        scanner.startScanning(
+            BleScanner.ScanTarget.ANDROID_ONLY
         )
 
         mainHandler.postDelayed(
-            scanTimeoutRunnable,
-            SCAN_TIMEOUT_MS
+            androidScanTimeoutRunnable,
+            ANDROID_SCAN_MS
+        )
+
+        Log.d(
+            TAG,
+            "Android scan packet=${packet.id}"
+        )
+    }
+
+    /*
+     * PHASE 2
+     *
+     * Accept Windows gateway.
+     */
+    private fun startFallbackScan() {
+
+        val packet =
+            pendingPacket
+                ?: return
+
+        if (
+            sendingPacket != null
+        ) {
+            return
+        }
+
+        cancelScanTimers()
+
+        scanner.stopScanning()
+
+        scanPhase =
+            ScanPhase.ANY_RESCUEMESH
+
+        postStatus(
+            "Looking for RESCUEMESH gateway..."
+        )
+
+        scanner.startScanning(
+            BleScanner.ScanTarget.ANY_RESCUEMESH
+        )
+
+        mainHandler.postDelayed(
+            fallbackScanTimeoutRunnable,
+            FALLBACK_SCAN_MS
+        )
+
+        Log.d(
+            TAG,
+            "Gateway scan packet=${packet.id}"
         )
     }
 
@@ -407,47 +584,183 @@ class MeshEngine(
                 ?: return
 
         /*
-         * Do not immediately send a relayed packet
-         * back to the phone that just gave it to us.
+         * Avoid multiple simultaneous connections
+         * from queued scan callbacks.
          */
-        val source =
-            excludedDevice
-
         if (
-            source != null &&
-            device == source
+            sendingPacket != null
+        ) {
+
+            return
+        }
+
+        val candidateAddress =
+            safeAddress(
+                device
+            )
+
+        Log.d(
+            TAG,
+            "Candidate=$candidateAddress " +
+                    "phase=$scanPhase " +
+                    "RSSI=$rssi"
+        )
+
+        /*
+         * Extra safeguard.
+         *
+         * BLE addresses can rotate, so our primary
+         * loop protection is still hiding after send.
+         */
+        if (
+            excludedAddress != null &&
+            candidateAddress.equals(
+                excludedAddress,
+                ignoreCase = true
+            )
         ) {
 
             postStatus(
-                "Ignoring previous hop; looking for another node..."
+                "Ignoring previous hop"
             )
 
             return
         }
 
-        mainHandler.removeCallbacks(
-            scanTimeoutRunnable
-        )
+        cancelScanTimers()
 
         scanner.stopScanning()
-
-        pendingPacket =
-            null
-
-        excludedDevice =
-            null
 
         sendingPacket =
             packet
 
+        sendingAddress =
+            candidateAddress
+
+        val destinationType =
+            when (scanPhase) {
+
+                ScanPhase.ANDROID_PREFERRED ->
+                    "Android relay"
+
+                ScanPhase.ANY_RESCUEMESH ->
+                    "RESCUEMESH gateway"
+
+                null ->
+                    "RESCUEMESH node"
+            }
+
+        scanPhase =
+            null
+
         postStatus(
-            "Next relay found ($rssi dBm). Connecting..."
+            "$destinationType found. Sending hop ${packet.hopCount}..."
         )
+
+        Log.d(
+            TAG,
+            "Sending to $candidateAddress"
+        )
+
+        /*
+         * Current hackathon loop prevention.
+         *
+         * Once this node forwards, make it invisible.
+         */
+        pauseAdvertisingAfterForward()
 
         gattClient.connectAndSend(
             device = device,
             message = packet.toJson()
         )
+    }
+
+    private fun handleSendSuccess() {
+
+        val packet =
+            sendingPacket
+                ?: return
+
+        val destination =
+            sendingAddress
+                ?: "(unknown)"
+
+        Log.d(
+            TAG,
+            "SUCCESS packet=${packet.id} " +
+                    "hop=${packet.hopCount} " +
+                    "destination=$destination"
+        )
+
+        /*
+         * Packet only disappears after actual
+         * successful characteristic write.
+         */
+        pendingPacket =
+            null
+
+        sendingPacket =
+            null
+
+        sendingAddress =
+            null
+
+        excludedAddress =
+            null
+
+        scanPhase =
+            null
+
+        cancelScanTimers()
+
+        onPacketSent(
+            packet
+        )
+
+        postStatus(
+            "Packet ${packet.id.take(8)} sent successfully at hop ${packet.hopCount}"
+        )
+    }
+
+    private fun pauseAdvertisingAfterForward() {
+
+        Log.d(
+            TAG,
+            "Stopping advertisement after forwarding"
+        )
+
+        postStatus(
+            "Forwarding SOS. Hiding this node from further relay scans."
+        )
+
+        advertiser.stopAdvertising()
+    }
+
+    private fun cancelScanTimers() {
+
+        mainHandler.removeCallbacks(
+            androidScanTimeoutRunnable
+        )
+
+        mainHandler.removeCallbacks(
+            fallbackScanTimeoutRunnable
+        )
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun safeAddress(
+        device: BluetoothDevice
+    ): String {
+
+        return try {
+
+            device.address
+                ?: "(unknown)"
+
+        } catch (_: SecurityException) {
+
+            "(permission denied)"
+        }
     }
 
     private fun postStatus(

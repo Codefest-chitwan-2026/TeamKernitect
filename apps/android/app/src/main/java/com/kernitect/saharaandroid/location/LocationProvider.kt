@@ -5,140 +5,170 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Location
-import android.location.LocationManager
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.CurrentLocationRequest
 import com.google.android.gms.location.Granularity
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
-import com.google.android.gms.tasks.CancellationTokenSource
 
 class LocationProvider(
-    private val context: Context
+    context: Context
 ) {
-
-    private val fusedLocationClient =
-        LocationServices.getFusedLocationProviderClient(context)
-
-    private val locationManager =
-        context.getSystemService(
-            Context.LOCATION_SERVICE
-        ) as LocationManager
 
     companion object {
 
-        // For the hackathon, reject obviously bad fixes.
-        const val MAX_ACCEPTABLE_ACCURACY_METERS = 100f
+        /*
+         * For the hackathon SOS we reject locations
+         * worse than 100 meters.
+         */
+        const val MAX_ACCEPTABLE_ACCURACY_METERS =
+            100f
+
+        private const val LOCATION_TIMEOUT_MS =
+            20_000L
     }
+
+    private val appContext =
+        context.applicationContext
+
+    private val fusedLocationClient =
+        LocationServices.getFusedLocationProviderClient(
+            appContext
+        )
 
     fun getCurrentLocation(
         onSuccess: (Location) -> Unit,
         onError: (String) -> Unit
     ) {
 
-        val hasFineLocation =
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-
-        if (!hasFineLocation) {
+        if (!hasFineLocationPermission()) {
 
             onError(
-                "Precise location permission is not granted"
+                "Precise location permission is required"
             )
 
             return
         }
 
-        if (!locationManager.isLocationEnabled) {
-
-            onError(
-                "Location services are disabled"
-            )
-
-            return
-        }
-
-        getFreshLocation(
+        requestCurrentLocation(
             onSuccess = onSuccess,
             onError = onError
         )
     }
 
     @SuppressLint("MissingPermission")
-    private fun getFreshLocation(
+    private fun requestCurrentLocation(
         onSuccess: (Location) -> Unit,
         onError: (String) -> Unit
     ) {
 
         val request =
             CurrentLocationRequest.Builder()
+                /*
+                 * We want the most accurate fix available.
+                 */
                 .setPriority(
                     Priority.PRIORITY_HIGH_ACCURACY
                 )
+
+                /*
+                 * Require fine-grained positioning.
+                 */
                 .setGranularity(
                     Granularity.GRANULARITY_FINE
                 )
 
-                // 0 = do not return an old cached location.
-                .setMaxUpdateAgeMillis(0)
+                /*
+                 * Do not accept an old cached location.
+                 *
+                 * We want a fresh SOS location.
+                 */
+                .setMaxUpdateAgeMillis(
+                    0
+                )
 
-                // Give GPS some time to obtain a real fix.
-                .setDurationMillis(20_000)
+                /*
+                 * Give GPS some time to obtain a fix.
+                 */
+                .setDurationMillis(
+                    LOCATION_TIMEOUT_MS
+                )
+
                 .build()
 
-        val cancellationTokenSource =
-            CancellationTokenSource()
+        try {
 
-        fusedLocationClient
-            .getCurrentLocation(
-                request,
-                cancellationTokenSource.token
-            )
-            .addOnSuccessListener { location ->
-
-                if (location == null) {
-
-                    onError(
-                        "Could not obtain a fresh location. " +
-                                "Move near a window or outdoors and try again."
-                    )
-
-                    return@addOnSuccessListener
-                }
-
-                if (!location.hasAccuracy()) {
-
-                    onError(
-                        "Location received without an accuracy estimate."
-                    )
-
-                    return@addOnSuccessListener
-                }
-
-                if (
-                    location.accuracy >
-                    MAX_ACCEPTABLE_ACCURACY_METERS
-                ) {
-
-                    onError(
-                        "Location accuracy is too low: " +
-                                "${location.accuracy.toInt()} m. " +
-                                "Move near a window or outdoors and try again."
-                    )
-
-                    return@addOnSuccessListener
-                }
-
-                onSuccess(location)
-            }
-            .addOnFailureListener { exception ->
-
-                onError(
-                    exception.message
-                        ?: "Unable to obtain current location"
+            fusedLocationClient
+                .getCurrentLocation(
+                    request,
+                    null
                 )
-            }
+                .addOnSuccessListener { location ->
+
+                    if (location == null) {
+
+                        onError(
+                            "Could not get current location. Try moving near a window or outdoors."
+                        )
+
+                        return@addOnSuccessListener
+                    }
+
+                    /*
+                     * Location.hasAccuracy() tells us
+                     * whether Android supplied an
+                     * estimated horizontal accuracy.
+                     */
+                    if (!location.hasAccuracy()) {
+
+                        onError(
+                            "Location accuracy unavailable"
+                        )
+
+                        return@addOnSuccessListener
+                    }
+
+                    if (
+                        location.accuracy >
+                        MAX_ACCEPTABLE_ACCURACY_METERS
+                    ) {
+
+                        onError(
+                            "Location accuracy too low: " +
+                                    "${location.accuracy.toInt()} m. " +
+                                    "Move near a window or outdoors."
+                        )
+
+                        return@addOnSuccessListener
+                    }
+
+                    onSuccess(
+                        location
+                    )
+                }
+                .addOnFailureListener { exception ->
+
+                    onError(
+                        exception.message
+                            ?: "Failed to get current location"
+                    )
+                }
+
+        } catch (_: SecurityException) {
+
+            onError(
+                "Location permission error"
+            )
+        }
+    }
+
+    private fun hasFineLocationPermission():
+            Boolean {
+
+        return ContextCompat.checkSelfPermission(
+            appContext,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) ==
+                PackageManager.PERMISSION_GRANTED
     }
 }

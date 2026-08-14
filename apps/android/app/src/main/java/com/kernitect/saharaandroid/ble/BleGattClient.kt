@@ -6,6 +6,7 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothStatusCodes
 import android.content.Context
@@ -15,15 +16,22 @@ import androidx.core.content.ContextCompat
 
 class BleGattClient(
     private val context: Context,
-    private val onStatusChanged: (String) -> Unit,
-    private val onMessageSent: (() -> Unit)? = null
+
+    private val onStatusChanged:
+        (String) -> Unit,
+
+    private val onMessageSent:
+    (() -> Unit)? = null
 ) {
 
-    private var bluetoothGatt: BluetoothGatt? = null
+    private var connectedGatt:
+            BluetoothGatt? = null
 
-    private var pendingMessage: String? = null
+    private var messageCharacteristic:
+            BluetoothGattCharacteristic? = null
 
-    private var messageCharacteristic: BluetoothGattCharacteristic? = null
+    private var pendingMessage:
+            String? = null
 
     private val gattCallback =
         object : BluetoothGattCallback() {
@@ -35,52 +43,82 @@ class BleGattClient(
             ) {
 
                 if (
-                    status == BluetoothGatt.GATT_SUCCESS &&
-                    newState == BluetoothProfile.STATE_CONNECTED
+                    status ==
+                    BluetoothGatt.GATT_SUCCESS &&
+                    newState ==
+                    BluetoothProfile.STATE_CONNECTED
                 ) {
 
+                    connectedGatt =
+                        gatt
+
                     onStatusChanged(
-                        "Connected. Discovering services..."
+                        "Connected. Requesting MTU..."
                     )
 
-                    discoverServicesSafely(gatt)
+                    requestMtu(
+                        gatt
+                    )
 
                     return
                 }
 
                 if (
-                    newState == BluetoothProfile.STATE_DISCONNECTED
+                    newState ==
+                    BluetoothProfile.STATE_DISCONNECTED
                 ) {
 
                     onStatusChanged(
-                        "GATT disconnected"
+                        "Disconnected from BLE node"
                     )
 
-                    closeSpecificGattSafely(gatt)
-
-                    if (bluetoothGatt === gatt) {
-                        bluetoothGatt = null
-                    }
-
-                    messageCharacteristic = null
+                    closeGatt(
+                        gatt
+                    )
 
                     return
                 }
 
-                if (status != BluetoothGatt.GATT_SUCCESS) {
+                if (
+                    status !=
+                    BluetoothGatt.GATT_SUCCESS
+                ) {
 
                     onStatusChanged(
-                        "GATT connection failed: $status"
+                        "BLE connection failed: $status"
                     )
 
-                    closeSpecificGattSafely(gatt)
-
-                    if (bluetoothGatt === gatt) {
-                        bluetoothGatt = null
-                    }
-
-                    messageCharacteristic = null
+                    closeGatt(
+                        gatt
+                    )
                 }
+            }
+
+            override fun onMtuChanged(
+                gatt: BluetoothGatt,
+                mtu: Int,
+                status: Int
+            ) {
+
+                if (
+                    status ==
+                    BluetoothGatt.GATT_SUCCESS
+                ) {
+
+                    onStatusChanged(
+                        "MTU $mtu. Discovering services..."
+                    )
+
+                } else {
+
+                    onStatusChanged(
+                        "MTU failed. Discovering services anyway..."
+                    )
+                }
+
+                discoverServices(
+                    gatt
+                )
             }
 
             override fun onServicesDiscovered(
@@ -88,7 +126,10 @@ class BleGattClient(
                 status: Int
             ) {
 
-                if (status != BluetoothGatt.GATT_SUCCESS) {
+                if (
+                    status !=
+                    BluetoothGatt.GATT_SUCCESS
+                ) {
 
                     onStatusChanged(
                         "Service discovery failed: $status"
@@ -105,11 +146,15 @@ class BleGattClient(
                 if (service == null) {
 
                     onStatusChanged(
-                        "RESCUEMESH service not found"
+                        "RESCUEMESH SERVICE NOT FOUND"
                     )
 
                     return
                 }
+
+                onStatusChanged(
+                    "RESCUEMESH SERVICE FOUND"
+                )
 
                 val characteristic =
                     service.getCharacteristic(
@@ -119,7 +164,7 @@ class BleGattClient(
                 if (characteristic == null) {
 
                     onStatusChanged(
-                        "MESSAGE characteristic not found"
+                        "MESSAGE CHANNEL NOT FOUND"
                     )
 
                     return
@@ -129,32 +174,51 @@ class BleGattClient(
                     characteristic
 
                 onStatusChanged(
-                    "Service found. Requesting larger MTU..."
+                    "MESSAGE CHANNEL FOUND"
                 )
 
-                requestMtuSafely(gatt)
+                enableNotifications(
+                    gatt,
+                    characteristic
+                )
             }
 
-            override fun onMtuChanged(
+            override fun onDescriptorWrite(
                 gatt: BluetoothGatt,
-                mtu: Int,
+                descriptor: BluetoothGattDescriptor,
                 status: Int
             ) {
 
-                if (status == BluetoothGatt.GATT_SUCCESS) {
-
-                    onStatusChanged(
-                        "MTU $mtu. Sending message..."
-                    )
-
-                } else {
-
-                    onStatusChanged(
-                        "MTU request failed. Trying send..."
-                    )
+                if (
+                    descriptor.uuid !=
+                    BleConstants.CCCD_UUID
+                ) {
+                    return
                 }
 
-                writePendingMessageSafely(gatt)
+                if (
+                    status !=
+                    BluetoothGatt.GATT_SUCCESS
+                ) {
+
+                    onStatusChanged(
+                        "CCCD WRITE FAILED: $status"
+                    )
+
+                    return
+                }
+
+                onStatusChanged(
+                    "Notifications enabled. Sending packet..."
+                )
+
+                /*
+                 * GATT operations are asynchronous.
+                 * Only send after descriptor write finishes.
+                 */
+                writePendingMessage(
+                    gatt
+                )
             }
 
             override fun onCharacteristicWrite(
@@ -170,99 +234,70 @@ class BleGattClient(
                     return
                 }
 
-                if (status == BluetoothGatt.GATT_SUCCESS) {
-
-                    pendingMessage = null
+                if (
+                    status ==
+                    BluetoothGatt.GATT_SUCCESS
+                ) {
 
                     onStatusChanged(
-                        "SOS JSON sent successfully"
+                        "MESSAGE SENT"
                     )
+
+                    pendingMessage =
+                        null
 
                     onMessageSent?.invoke()
 
                 } else {
 
                     onStatusChanged(
-                        "SOS write failed: $status"
+                        "MESSAGE WRITE FAILED: $status"
                     )
                 }
             }
         }
-
-    /*
-     * Android 12+ requires BLUETOOTH_CONNECT
-     * for GATT connections and operations.
-     *
-     * Android 11 and lower use the legacy
-     * Bluetooth permission model.
-     */
-    private fun hasBluetoothConnectPermission(): Boolean {
-
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-            return true
-        }
-
-        return ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.BLUETOOTH_CONNECT
-        ) == PackageManager.PERMISSION_GRANTED
-    }
 
     fun connectAndSend(
         device: BluetoothDevice,
         message: String
     ) {
 
-        if (!hasBluetoothConnectPermission()) {
+        if (!hasConnectPermission()) {
 
             onStatusChanged(
-                "GATT client failed: Bluetooth permission missing"
+                "BLUETOOTH_CONNECT permission missing"
             )
 
             return
         }
 
-        if (!AppRequirements.isBluetoothEnabled(context)) {
+        pendingMessage =
+            message
 
-            onStatusChanged(
-                "GATT client failed: Bluetooth is off"
-            )
-
-            return
-        }
-
-        connectWithPermission(
-            device = device,
-            message = message
+        connect(
+            device
         )
     }
 
     @SuppressLint("MissingPermission")
-    private fun connectWithPermission(
-        device: BluetoothDevice,
-        message: String
+    private fun connect(
+        device: BluetoothDevice
     ) {
 
         try {
 
-            /*
-             * Close any previous client connection before
-             * starting another one.
-             */
-            bluetoothGatt?.disconnect()
-            bluetoothGatt?.close()
+            connectedGatt?.let {
 
-            bluetoothGatt = null
-            messageCharacteristic = null
-
-            pendingMessage =
-                message
+                closeGatt(
+                    it
+                )
+            }
 
             onStatusChanged(
-                "Connecting to RESCUEMESH device..."
+                "Connecting to BLE node..."
             )
 
-            bluetoothGatt =
+            connectedGatt =
                 device.connectGatt(
                     context,
                     false,
@@ -270,42 +305,47 @@ class BleGattClient(
                     BluetoothDevice.TRANSPORT_LE
                 )
 
-            if (bluetoothGatt == null) {
+        } catch (_: SecurityException) {
+
+            onStatusChanged(
+                "Bluetooth connection permission error"
+            )
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun requestMtu(
+        gatt: BluetoothGatt
+    ) {
+
+        try {
+
+            val started =
+                gatt.requestMtu(
+                    512
+                )
+
+            if (!started) {
 
                 onStatusChanged(
-                    "Failed to create GATT connection"
+                    "MTU request unavailable. Discovering services..."
+                )
+
+                discoverServices(
+                    gatt
                 )
             }
 
         } catch (_: SecurityException) {
 
-            bluetoothGatt = null
-            messageCharacteristic = null
-
             onStatusChanged(
-                "GATT connection permission error"
+                "MTU permission error"
             )
         }
-    }
-
-    private fun discoverServicesSafely(
-        gatt: BluetoothGatt
-    ) {
-
-        if (!hasBluetoothConnectPermission()) {
-
-            onStatusChanged(
-                "Cannot discover services: permission missing"
-            )
-
-            return
-        }
-
-        discoverServicesWithPermission(gatt)
     }
 
     @SuppressLint("MissingPermission")
-    private fun discoverServicesWithPermission(
+    private fun discoverServices(
         gatt: BluetoothGatt
     ) {
 
@@ -329,84 +369,120 @@ class BleGattClient(
         }
     }
 
-    private fun requestMtuSafely(
-        gatt: BluetoothGatt
-    ) {
-
-        if (!hasBluetoothConnectPermission()) {
-
-            onStatusChanged(
-                "MTU request skipped: permission missing"
-            )
-
-            return
-        }
-
-        requestMtuWithPermission(gatt)
-    }
-
     @SuppressLint("MissingPermission")
-    private fun requestMtuWithPermission(
-        gatt: BluetoothGatt
+    private fun enableNotifications(
+        gatt: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic
     ) {
 
         try {
 
-            val started =
-                gatt.requestMtu(512)
-
-            /*
-             * Some devices may refuse to start an MTU request.
-             * In that case we still attempt the write.
-             */
-            if (!started) {
-
-                onStatusChanged(
-                    "MTU request unavailable. Trying send..."
+            val notificationSet =
+                gatt.setCharacteristicNotification(
+                    characteristic,
+                    true
                 )
 
-                writePendingMessageSafely(gatt)
+            if (!notificationSet) {
+
+                onStatusChanged(
+                    "setCharacteristicNotification failed"
+                )
+
+                return
+            }
+
+            val descriptor =
+                characteristic.getDescriptor(
+                    BleConstants.CCCD_UUID
+                )
+
+            if (descriptor == null) {
+
+                onStatusChanged(
+                    "CCCD NOT FOUND"
+                )
+
+                return
+            }
+
+            onStatusChanged(
+                "CCCD FOUND"
+            )
+
+            if (
+                Build.VERSION.SDK_INT >=
+                Build.VERSION_CODES.TIRAMISU
+            ) {
+
+                val result =
+                    gatt.writeDescriptor(
+                        descriptor,
+                        BluetoothGattDescriptor
+                            .ENABLE_NOTIFICATION_VALUE
+                    )
+
+                if (
+                    result !=
+                    BluetoothStatusCodes.SUCCESS
+                ) {
+
+                    onStatusChanged(
+                        "Could not start CCCD write: $result"
+                    )
+                }
+
+            } else {
+
+                @Suppress("DEPRECATION")
+                descriptor.value =
+                    BluetoothGattDescriptor
+                        .ENABLE_NOTIFICATION_VALUE
+
+                @Suppress("DEPRECATION")
+                val started =
+                    gatt.writeDescriptor(
+                        descriptor
+                    )
+
+                if (!started) {
+
+                    onStatusChanged(
+                        "Could not start CCCD write"
+                    )
+                }
             }
 
         } catch (_: SecurityException) {
 
             onStatusChanged(
-                "MTU request permission error"
+                "Notification permission error"
             )
         }
-    }
-
-    private fun writePendingMessageSafely(
-        gatt: BluetoothGatt
-    ) {
-
-        if (!hasBluetoothConnectPermission()) {
-
-            onStatusChanged(
-                "Cannot send SOS: Bluetooth permission missing"
-            )
-
-            return
-        }
-
-        writePendingMessageWithPermission(gatt)
     }
 
     @SuppressLint("MissingPermission")
-    private fun writePendingMessageWithPermission(
+    private fun writePendingMessage(
         gatt: BluetoothGatt
     ) {
-
-        val message =
-            pendingMessage
-                ?: return
 
         val characteristic =
             messageCharacteristic
                 ?: run {
 
                     onStatusChanged(
-                        "Cannot send: characteristic unavailable"
+                        "MESSAGE characteristic unavailable"
+                    )
+
+                    return
+                }
+
+        val message =
+            pendingMessage
+                ?: run {
+
+                    onStatusChanged(
+                        "No pending BLE message"
                     )
 
                     return
@@ -417,16 +493,12 @@ class BleGattClient(
                 Charsets.UTF_8
             )
 
-        onStatusChanged(
-            "Writing ${bytes.size} bytes..."
-        )
-
         try {
 
-            /*
-             * Android 13 / API 33 introduced the
-             * newer writeCharacteristic overload.
-             */
+            onStatusChanged(
+                "Writing ${bytes.size} bytes..."
+            )
+
             if (
                 Build.VERSION.SDK_INT >=
                 Build.VERSION_CODES.TIRAMISU
@@ -436,7 +508,8 @@ class BleGattClient(
                     gatt.writeCharacteristic(
                         characteristic,
                         bytes,
-                        BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                        BluetoothGattCharacteristic
+                            .WRITE_TYPE_DEFAULT
                     )
 
                 if (
@@ -445,18 +518,16 @@ class BleGattClient(
                 ) {
 
                     onStatusChanged(
-                        "Could not start write: $result"
+                        "Could not start message write: $result"
                     )
                 }
 
             } else {
 
-                /*
-                 * Android 11 uses this legacy API.
-                 */
                 @Suppress("DEPRECATION")
                 characteristic.writeType =
-                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                    BluetoothGattCharacteristic
+                        .WRITE_TYPE_DEFAULT
 
                 @Suppress("DEPRECATION")
                 characteristic.value =
@@ -471,7 +542,7 @@ class BleGattClient(
                 if (!started) {
 
                     onStatusChanged(
-                        "Could not start write"
+                        "Could not start message write"
                     )
                 }
             }
@@ -479,72 +550,76 @@ class BleGattClient(
         } catch (_: SecurityException) {
 
             onStatusChanged(
-                "SOS write permission error"
+                "Message write permission error"
             )
         }
     }
 
-    fun close() {
+    private fun hasConnectPermission():
+            Boolean {
 
-        if (bluetoothGatt == null) {
+        if (
+            Build.VERSION.SDK_INT <
+            Build.VERSION_CODES.S
+        ) {
 
-            pendingMessage = null
-            messageCharacteristic = null
-
-            return
+            return true
         }
 
-        if (!hasBluetoothConnectPermission()) {
-
-            bluetoothGatt = null
-            pendingMessage = null
-            messageCharacteristic = null
-
-            return
-        }
-
-        closeWithPermission()
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.BLUETOOTH_CONNECT
+        ) ==
+                PackageManager.PERMISSION_GRANTED
     }
 
     @SuppressLint("MissingPermission")
-    private fun closeWithPermission() {
+    private fun closeGatt(
+        gatt: BluetoothGatt
+    ) {
 
         try {
 
-            bluetoothGatt?.disconnect()
-            bluetoothGatt?.close()
+            gatt.disconnect()
 
-        } catch (_: SecurityException) {
-            // Permission may have been revoked while running.
+        } catch (_: Exception) {
         }
-
-        bluetoothGatt = null
-        pendingMessage = null
-        messageCharacteristic = null
-    }
-
-    private fun closeSpecificGattSafely(
-        gatt: BluetoothGatt
-    ) {
-
-        if (!hasBluetoothConnectPermission()) {
-            return
-        }
-
-        closeSpecificGattWithPermission(gatt)
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun closeSpecificGattWithPermission(
-        gatt: BluetoothGatt
-    ) {
 
         try {
 
             gatt.close()
 
-        } catch (_: SecurityException) {
-            // Ignore cleanup failure.
+        } catch (_: Exception) {
         }
+
+        if (
+            connectedGatt === gatt
+        ) {
+
+            connectedGatt =
+                null
+        }
+
+        messageCharacteristic =
+            null
+    }
+
+    fun close() {
+
+        connectedGatt?.let {
+
+            closeGatt(
+                it
+            )
+        }
+
+        connectedGatt =
+            null
+
+        messageCharacteristic =
+            null
+
+        pendingMessage =
+            null
     }
 }
