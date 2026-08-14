@@ -12,8 +12,9 @@ data class RescuePacket(
     val hopCount: Int,
     val ttl: Int
 ) {
+
     fun toJson(): String {
-        return JSONObject().apply{
+        return JSONObject().apply {
             put("id", id)
             put("type", type)
             put("latitude", latitude)
@@ -35,13 +36,15 @@ data class RescuePacket(
     }
 
     companion object {
+
         const val TYPE_SOS = "SOS"
         const val DEFAULT_TTL = 5
 
-        fun createSOS(
+        fun createSos(
             latitude: Double,
             longitude: Double
         ): RescuePacket {
+
             return RescuePacket(
                 id = UUID.randomUUID().toString(),
                 type = TYPE_SOS,
@@ -53,9 +56,14 @@ data class RescuePacket(
             )
         }
 
-        fun fromJson(json: String): RescuePacket? {
+        fun fromJson(
+            json: String
+        ): RescuePacket? {
+
             return try {
-                val obj = JSONObject(json)
+
+                val obj =
+                    JSONObject(json)
 
                 RescuePacket(
                     id = obj.getString("id"),
@@ -63,10 +71,12 @@ data class RescuePacket(
                     latitude = obj.getDouble("latitude"),
                     longitude = obj.getDouble("longitude"),
                     timestamp = obj.getLong("timestamp"),
-                    hopCount = obj.getInt("hopCound"),
+                    hopCount = obj.getInt("hopCount"),
                     ttl = obj.getInt("ttl")
                 )
-            } catch (e: Exception) {
+
+            } catch (_: Exception) {
+
                 null
             }
         }
