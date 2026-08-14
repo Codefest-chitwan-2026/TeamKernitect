@@ -2,9 +2,6 @@
     x:Class="SaharaGateway.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    mc:Ignorable="d"
     Title="Sahara Gateway">
 
     <Grid Padding="32">
@@ -22,8 +19,7 @@
 
             <StackPanel
                 Orientation="Horizontal"
-                Spacing="12"
-                Margin="0,16,0,0">
+                Spacing="12">
 
                 <Button
                     Content="Start BLE Gateway"
@@ -36,20 +32,28 @@
             </StackPanel>
 
             <TextBlock
-                Text="Status"
-                FontWeight="SemiBold"
-                Margin="0,20,0,0" />
+                Text="Gateway Status"
+                FontWeight="SemiBold" />
 
             <TextBlock
                 x:Name="StatusText"
                 Text="Gateway stopped"
-                FontSize="18"
                 TextWrapping="Wrap" />
 
             <TextBlock
-                Text="Latest BLE Message"
+                Text="FastAPI Status"
                 FontWeight="SemiBold"
-                Margin="0,20,0,0" />
+                Margin="0,12,0,0" />
+
+            <TextBlock
+                x:Name="ApiStatusText"
+                Text="No request sent yet"
+                TextWrapping="Wrap" />
+
+            <TextBlock
+                Text="Latest SOS JSON"
+                FontWeight="SemiBold"
+                Margin="0,12,0,0" />
 
             <TextBox
                 x:Name="MessageTextBox"

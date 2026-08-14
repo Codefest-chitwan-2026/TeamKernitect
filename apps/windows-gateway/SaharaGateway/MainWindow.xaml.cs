@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using SaharaGateway.BleGateway;
+using SaharaGateway.Services;
 
 namespace SaharaGateway
 {
@@ -7,12 +8,17 @@ namespace SaharaGateway
     {
         private readonly BleServer _bleServer;
 
+        private readonly ApiClient _apiClient;
+
         public MainWindow()
         {
             InitializeComponent();
 
             _bleServer =
                 new BleServer();
+
+            _apiClient =
+                new ApiClient();
 
             _bleServer.StatusChanged +=
                 BleServer_StatusChanged;
@@ -55,13 +61,25 @@ namespace SaharaGateway
         )
         {
             DispatcherQueue.TryEnqueue(
-                () =>
+                async () =>
                 {
                     StatusText.Text =
-                        "MESSAGE RECEIVED";
+                        "SOS RECEIVED OVER BLE";
 
                     MessageTextBox.Text =
                         message;
+
+                    ApiStatusText.Text =
+                        "Sending SOS to FastAPI...";
+
+                    var result =
+                        await _apiClient
+                            .SendSosAsync(
+                                message
+                            );
+
+                    ApiStatusText.Text =
+                        result;
                 }
             );
         }
