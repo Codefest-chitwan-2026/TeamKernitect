@@ -33,7 +33,7 @@ fun SosButton(
                 contentColor = Color.White
             ),
             border = BorderStroke(
-                width = 4.dp,
+                width = 5.dp,
                 color = Color.White
             ),
             contentPadding = ButtonDefaults.ContentPadding
