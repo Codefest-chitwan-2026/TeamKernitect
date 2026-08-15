@@ -7,100 +7,133 @@ import {
   type SosStats,
 } from "./services/api";
 
+import Sidebar from "./components/Sidebar";
+import Topbar from "./components/Topbar";
+
+import Dashboard from "./pages/Dashboard";
+import MapPage from "./pages/MapPage";
+import TeamManagement from "./pages/TeamManagement";
+import AssignTeam from "./pages/AssignTeam";
+import Notifications from "./pages/Notifications";
 
 function App() {
+  const [activePage, setActivePage] = useState("dashboard");
+
   const [sosItems, setSosItems] = useState<Sos[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<SosStats | null>(null);
 
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
+  const pageTitles: Record<string, string> = {
+    dashboard: "Dashboard",
+    map: "Live Map",
+    teams: "Team Management",
+    assign: "Assign Rescue Team",
+    notifications: "Notifications",
+  };
 
   useEffect(() => {
- async function loadSos() {
-  try {
-    const [sosData, statsData] = await Promise.all([
-      getSosList(),
-      getSosStats(),
-    ]);
+    async function loadSos() {
+      try {
+        const [sosData, statsData] = await Promise.all([
+          getSosList(),
+          getSosStats(),
+        ]);
 
-    setSosItems(sosData.items);
-    setStats(statsData);
-  } catch (err) {
-    setError(
-      err instanceof Error
-        ? err.message
-        : "Unknown error"
-    );
-  } finally {
-    setLoading(false);
-  }
-}
+        setSosItems(sosData.items);
+        setStats(statsData);
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Unknown error"
+        );
+      } finally {
+        setLoading(false);
+      }
+    }
 
     loadSos();
   }, []);
 
-
-  if (loading) {
-    return <p>Loading Sahara emergencies...</p>;
-  }
-
-
-  if (error) {
-    return <p>Error: {error}</p>;
-  }
-
-
-  return (
-    <div>
-      <h1>Sahara Rescue Dashboard</h1>
-      {stats && (
-  <div>
-    <h2>Emergency Statistics</h2>
-
-    <p>Total SOS: {stats.total}</p>
-    <p>New: {stats.new}</p>
-    <p>Responding: {stats.responding}</p>
-    <p>Resolved: {stats.resolved}</p>
-    <p>Critical Active: {stats.criticalActive}</p>
-  </div>
-)}
-      <h2>
-        Active SOS Messages: {sosItems.length}
-      </h2>
-
-      {sosItems.map((sos) => (
-        <div key={sos.id}>
-          <hr />
-
-          <h3>
-            {sos.type} — {sos.priority}
-          </h3>
-
-          <p>
-            ID: {sos.id}
-          </p>
-
-          <p>
-            Status: {sos.status}
-          </p>
-
-          <p>
-            Location: {sos.latitude}, {sos.longitude}
-          </p>
-
-          <p>
-            Message: {sos.message ?? "No description"}
-          </p>
-
-          <p>
-            Hop Count: {sos.hopCount}
+  const renderPage = () => {
+    if (loading) {
+      return (
+        <div className="flex min-h-[300px] items-center justify-center">
+          <p className="text-sm text-gray-500">
+            Loading Sahara emergencies...
           </p>
         </div>
-      ))}
+      );
+    }
+
+    if (error) {
+      return (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-6">
+          <p className="font-medium text-red-600">
+            Unable to load emergency data
+          </p>
+
+          <p className="mt-1 text-sm text-red-500">
+            {error}
+          </p>
+        </div>
+      );
+    }
+
+    switch (activePage) {
+      case "map":
+        return <MapPage />;
+
+      case "teams":
+        return (
+          <TeamManagement
+            onAssign={() => setActivePage("assign")}
+          />
+        );
+
+      case "assign":
+        return (
+          <AssignTeam
+            onBack={() => setActivePage("teams")}
+          />
+        );
+
+      case "notifications":
+        return <Notifications />;
+
+      default:
+        return (
+          <Dashboard
+            sosItems={sosItems}
+            stats={stats}
+          />
+        );
+    }
+  };
+
+  return (
+    <div className="flex min-h-screen bg-gray-50 text-gray-900">
+
+      <Sidebar
+        activePage={activePage}
+        onNavigate={setActivePage}
+      />
+
+      <div className="flex min-w-0 flex-1 flex-col">
+
+        <Topbar
+          title={pageTitles[activePage] ?? "Dashboard"}
+        />
+
+        <main className="flex-1 overflow-auto p-6 lg:p-8">
+          {renderPage()}
+        </main>
+
+      </div>
     </div>
   );
 }
-
 
 export default App;
