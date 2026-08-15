@@ -17,6 +17,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kernitect.sahararesponder.model.ResponderIncident
+import com.kernitect.sahararesponder.model.ResponderTeamProfile
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -59,6 +60,19 @@ fun ResponderTopBar(unreadCount: Int) {
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun TeamIdentityCard(profile: ResponderTeamProfile) {
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), color = Color(0xFFFFEEEE)) {
+        Row(Modifier.padding(horizontal = 15.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(profile.teamName, fontWeight = FontWeight.Bold)
+                Text("${profile.callsign} • ${profile.district}", color = CriticalRed, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            }
+            Text("OFFLINE READY", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -145,7 +159,7 @@ fun SituationMapCard(incidentCount: Int, responderLocated: Boolean, onOpenMap: (
 }
 
 @Composable
-fun CompactIncidentCard(incident: ResponderIncident, onClick: () -> Unit) {
+fun CompactIncidentCard(incident: ResponderIncident, assignmentLabel: String? = null, onClick: () -> Unit) {
     Card(Modifier.fillMaxWidth().clickable(onClick = onClick), shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = Color.White), border = CardDefaults.outlinedCardBorder()) {
         Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -154,6 +168,7 @@ fun CompactIncidentCard(incident: ResponderIncident, onClick: () -> Unit) {
             }
             Text(incident.message, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text("${formatIncidentTime(incident.timestamp)}  •  Hop ${incident.hopCount}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            assignmentLabel?.let { Text(it, color = CriticalRed, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold) }
             Text("View Details", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
         }
     }

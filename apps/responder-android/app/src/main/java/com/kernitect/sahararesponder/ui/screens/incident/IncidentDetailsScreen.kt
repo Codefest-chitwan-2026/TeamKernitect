@@ -9,13 +9,18 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.kernitect.sahararesponder.model.ResponderIncident
+import com.kernitect.sahararesponder.model.ResponderTeamProfile
 import com.kernitect.sahararesponder.location.RescueNavigationCalculator
 import com.kernitect.sahararesponder.location.ResponderLocation
+import com.kernitect.sahararesponder.mesh.AckRecord
+import com.kernitect.sahararesponder.mesh.AckSendState
 import com.kernitect.sahararesponder.ui.components.*
 
 @Composable
@@ -25,8 +30,14 @@ fun IncidentDetailsScreen(
     locationStatus: String,
     onBack: () -> Unit,
     onOpenMap: () -> Unit,
+    ackRecord: AckRecord?,
+    onAcceptRescue: () -> Unit,
+    onRetryAck: () -> Unit,
+    teamProfile: ResponderTeamProfile,
+    identityError: String?,
     modifier: Modifier = Modifier,
 ) {
+    var showAcceptDialog by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     val validVictim = RescueNavigationCalculator.isValidCoordinate(incident.latitude, incident.longitude)
     val distance = responderLocation?.let { RescueNavigationCalculator.distanceMeters(it, incident.latitude, incident.longitude) }
     val bearing = responderLocation?.let { RescueNavigationCalculator.bearingDegrees(it, incident.latitude, incident.longitude) }
@@ -70,18 +81,53 @@ fun IncidentDetailsScreen(
             }
             DetailCard("Rescue Status") {
                 DetailRow("Current status", incident.status)
-                Text("No responder has accepted this incident yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (incident.status == "NEW") {
+                    Text("This request has not been accepted.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    DetailRow("Responder", "${teamProfile.teamName} • ${teamProfile.callsign}")
+                } else {
+                    Text("Accepted by ${teamProfile.teamName}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    Text("${teamProfile.callsign} • ${teamProfile.district}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    DetailRow("Acknowledgement", ackRecord?.state?.message ?: "Preparing acknowledgement…")
+                    ackRecord?.failureReason?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    if (ackRecord?.state == AckSendState.FAILED) {
+                        OutlinedButton(onClick = onRetryAck, modifier = Modifier.fillMaxWidth()) { Text("RETRY ACK") }
+                    }
+                }
+                identityError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold) }
             }
             Spacer(Modifier.height(4.dp))
         }
         Surface(shadowElevation = 8.dp) {
             Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                Button(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
-                    Text("ACCEPT RESCUE")
+                Button(
+                    onClick = { showAcceptDialog = true },
+                    enabled = incident.status == "NEW",
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                ) {
+                    Text(if (incident.status == "NEW") "ACCEPT RESCUE" else "RESCUE ACCEPTED")
                 }
-                Text("Available after rescue-link setup", Modifier.align(Alignment.CenterHorizontally).padding(top = 6.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    if (incident.status == "NEW") "Confirmation required" else "Local responder assignment active",
+                    Modifier.align(Alignment.CenterHorizontally).padding(top = 6.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
+    }
+    if (showAcceptDialog) {
+        AlertDialog(
+            onDismissRequest = { showAcceptDialog = false },
+            title = { Text("Accept this rescue request?") },
+            text = { Text("You will take responsibility for this incident and SAHARA will send an acknowledgement through RESCUEMESH.") },
+            dismissButton = { TextButton(onClick = { showAcceptDialog = false }) { Text("Cancel") } },
+            confirmButton = {
+                Button(onClick = {
+                    showAcceptDialog = false
+                    onAcceptRescue()
+                }) { Text("Accept Rescue") }
+            },
+        )
     }
 }
 

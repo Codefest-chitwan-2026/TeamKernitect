@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.kernitect.sahararesponder.model.ResponderIncident
+import com.kernitect.sahararesponder.model.ResponderTeamProfile
 import com.kernitect.sahararesponder.ui.components.*
 
 private val activeStatuses = setOf("ACCEPTED", "ON_THE_WAY", "NEARBY", "ARRIVED")
@@ -21,6 +22,7 @@ fun ResponderHomeScreen(
     onViewDetails: (ResponderIncident) -> Unit,
     responderLocated: Boolean,
     onOpenMap: () -> Unit,
+    teamProfile: ResponderTeamProfile,
     modifier: Modifier = Modifier,
 ) {
     val newest = incidents.sortedByDescending { it.receivedAt }
@@ -37,6 +39,7 @@ fun ResponderHomeScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item { ResponderTopBar(newCount) }
+        item { Box(Modifier.padding(horizontal = 20.dp)) { TeamIdentityCard(teamProfile) } }
         item { Box(Modifier.padding(horizontal = 20.dp)) { MeshStatusCard(meshStatus) } }
         item { Box(Modifier.padding(horizontal = 20.dp)) { IncidentSummaryRow(newCount, activeCount, completedCount) } }
         item { SectionHeader("Priority Alert") }

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -27,6 +28,12 @@ import com.kernitect.sahararesponder.ble.ResponderBleAdvertiser
 import com.kernitect.sahararesponder.ble.ResponderBleServer
 import com.kernitect.sahararesponder.model.RescuePacket
 import com.kernitect.sahararesponder.model.ResponderIncident
+import com.kernitect.sahararesponder.model.RescueAckPacket
+import com.kernitect.sahararesponder.model.ResponderTeamProfile
+import com.kernitect.sahararesponder.identity.ResponderIdentityStore
+import com.kernitect.sahararesponder.mesh.AckRecord
+import com.kernitect.sahararesponder.mesh.AckSendState
+import com.kernitect.sahararesponder.mesh.ResponderMeshSender
 import com.kernitect.sahararesponder.location.ResponderLocation
 import com.kernitect.sahararesponder.location.ResponderLocationProvider
 import com.kernitect.sahararesponder.ui.components.ResponderBottomBar
@@ -35,6 +42,7 @@ import com.kernitect.sahararesponder.ui.screens.active.ActiveRescuesScreen
 import com.kernitect.sahararesponder.ui.screens.home.ResponderHomeScreen
 import com.kernitect.sahararesponder.ui.screens.incident.IncidentDetailsScreen
 import com.kernitect.sahararesponder.ui.screens.map.ResponderMapScreen
+import com.kernitect.sahararesponder.ui.screens.setup.ResponderSetupScreen
 import com.kernitect.sahararesponder.ui.theme.SaharaResponderTheme
 import org.osmdroid.config.Configuration
 
@@ -42,16 +50,21 @@ class MainActivity : ComponentActivity() {
     private var meshStatus by mutableStateOf("Starting RESCUEMESH")
     private val incidents = mutableStateListOf<ResponderIncident>()
     private val seenPacketIds = mutableSetOf<String>()
+    private val ackRecords = mutableStateMapOf<String, AckRecord>()
     private var receiverStarted = false
     private var activityStarted = false
     private var responderLocation by mutableStateOf<ResponderLocation?>(null)
     private var locationStatus by mutableStateOf("Responder location permission required")
+    private var teamProfile by mutableStateOf<ResponderTeamProfile?>(null)
+    private var identityError by mutableStateOf<String?>(null)
     private lateinit var bleServer: ResponderBleServer
     private lateinit var bleAdvertiser: ResponderBleAdvertiser
     private lateinit var locationProvider: ResponderLocationProvider
+    private lateinit var meshSender: ResponderMeshSender
+    private lateinit var identityStore: ResponderIdentityStore
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
-        if (results.values.all { it }) startReceiverIfReady() else {
+        if (hasRequiredPermissions()) startReceiverIfReady() else {
             Log.w(TAG, "Bluetooth permission missing")
             meshStatus = "Bluetooth permission required"
         }
@@ -70,6 +83,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         Configuration.getInstance().load(applicationContext, PreferenceManager.getDefaultSharedPreferences(applicationContext))
         Configuration.getInstance().userAgentValue = packageName
+        identityStore = ResponderIdentityStore(applicationContext)
+        teamProfile = identityStore.loadProfile()
         bleAdvertiser = ResponderBleAdvertiser(applicationContext, ::postStatus)
         bleServer = ResponderBleServer(
             context = applicationContext,
@@ -85,8 +100,23 @@ class MainActivity : ComponentActivity() {
             } },
             onStatus = { status -> runOnUiThread { locationStatus = status } },
         )
+        meshSender = ResponderMeshSender(applicationContext) { incidentId, state, failureReason ->
+            runOnUiThread {
+                val existing = ackRecords[incidentId] ?: return@runOnUiThread
+                ackRecords[incidentId] = existing.copy(state = state, failureReason = failureReason)
+            }
+        }
         setContent {
             SaharaResponderTheme {
+                val configuredTeam = teamProfile
+                if (configuredTeam == null) {
+                    ResponderSetupScreen(
+                        onActivate = { selectedTeam ->
+                            teamProfile = identityStore.activate(selectedTeam)
+                            identityError = null
+                        },
+                    )
+                } else {
                 var destination by remember { mutableStateOf(ResponderDestination.HOME) }
                 var selectedIncident by remember { mutableStateOf<ResponderIncident?>(null) }
                 var focusedMapIncident by remember { mutableStateOf<ResponderIncident?>(null) }
@@ -118,6 +148,14 @@ class MainActivity : ComponentActivity() {
                             locationStatus = locationStatus,
                             onBack = { selectedIncident = null },
                             onOpenMap = { focusedMapIncident = selected },
+                            ackRecord = ackRecords[selected.id],
+                            teamProfile = configuredTeam,
+                            identityError = identityError,
+                            onAcceptRescue = {
+                                val accepted = acceptIncident(selected)
+                                selectedIncident = accepted
+                            },
+                            onRetryAck = { retryAck(selected.id) },
                             modifier = Modifier.padding(padding),
                         )
                     } else {
@@ -128,6 +166,7 @@ class MainActivity : ComponentActivity() {
                                 onViewDetails = { selectedIncident = it },
                                 responderLocated = responderLocation != null,
                                 onOpenMap = { destination = ResponderDestination.MAP },
+                                teamProfile = configuredTeam,
                                 modifier = Modifier.padding(padding),
                             )
                             ResponderDestination.MAP -> ResponderMapScreen(
@@ -137,17 +176,20 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.padding(padding),
                             )
                             ResponderDestination.ACTIVE -> ActiveRescuesScreen(
-                                activeCount = incidents.count { it.status in ACTIVE_STATUSES },
+                                incidents = incidents.filter { it.status in ACTIVE_STATUSES },
+                                teamProfile = configuredTeam,
+                                onViewDetails = { selectedIncident = it },
                                 modifier = Modifier.padding(padding),
                             )
                         }
                     }
                 }
+                }
             }
         }
-        val bluetoothAlreadyGranted = hasRequiredPermissions()
+        val bluetoothDialogNeeded = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !hasAllBluetoothPermissions()
         ensurePermissionsAndStart()
-        if (bluetoothAlreadyGranted) ensureLocationPermission()
+        if (!bluetoothDialogNeeded) ensureLocationPermission()
     }
 
     override fun onStart() {
@@ -169,9 +211,9 @@ class MainActivity : ComponentActivity() {
 
     private fun ensurePermissionsAndStart() {
         if (hasRequiredPermissions()) startReceiverIfReady()
-        else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !hasAllBluetoothPermissions()) {
             meshStatus = "Bluetooth permission required"
-            permissionLauncher.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE))
+            permissionLauncher.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_SCAN))
         }
     }
 
@@ -222,6 +264,45 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun acceptIncident(incident: ResponderIncident): ResponderIncident {
+        if (incident.status != "NEW") return incident
+        val configuredTeam = teamProfile ?: run {
+            identityError = "Responder team identity is not configured."
+            Log.e(TAG, "Cannot accept incident without responder team identity")
+            return incident
+        }
+        val index = incidents.indexOfFirst { it.id == incident.id }
+        if (index < 0) return incident
+        identityError = null
+        val accepted = incident.copy(status = "ACCEPTED")
+        incidents[index] = accepted
+        Log.i(TAG, "Incident accepted: ${incident.id}")
+        val record = ackRecords.getOrPut(incident.id) {
+            AckRecord(RescueAckPacket.create(accepted, responderLocation, configuredTeam)).also {
+                Log.i(TAG, "ACK created: ${it.packet.id}")
+            }
+        }
+        sendAck(record)
+        return accepted
+    }
+
+    private fun retryAck(incidentId: String) {
+        val record = ackRecords[incidentId] ?: return
+        Log.i(TAG, "ACK retry requested: ${record.packet.id}")
+        sendAck(record)
+    }
+
+    private fun sendAck(record: AckRecord) {
+        if (!hasOutgoingScanPermission()) {
+            ackRecords[record.packet.incidentId] = record.copy(
+                state = AckSendState.FAILED,
+                failureReason = "Bluetooth scan permission required",
+            )
+            return
+        }
+        meshSender.send(record.packet)
+    }
+
     private fun postStatus(status: String) = runOnUiThread { meshStatus = status }
 
     private fun hasRequiredPermissions(): Boolean {
@@ -229,6 +310,18 @@ class MainActivity : ComponentActivity() {
         return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED
     }
+
+    private fun hasAllBluetoothPermissions(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
+        return hasRequiredPermissions() &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun hasOutgoingScanPermission(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+        } else hasLocationPermission()
 
     private fun hasLocationPermission(): Boolean =
         ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
@@ -238,6 +331,7 @@ class MainActivity : ComponentActivity() {
         if (::bleAdvertiser.isInitialized) bleAdvertiser.stop()
         if (::bleServer.isInitialized) bleServer.stop()
         if (::locationProvider.isInitialized) locationProvider.stop()
+        if (::meshSender.isInitialized) meshSender.close()
         receiverStarted = false
         super.onDestroy()
     }
