@@ -1,81 +1,139 @@
 import { useEffect, useState } from "react";
-import "./App.css";
+
 import {
-  approveResponder, getRescueTeams, getResponders, getSosList, getSosStats,
-  rejectResponder, type RescueTeam, type ResponderRegistration, type Sos, type SosStats,
+  getSosList,
+  getSosStats,
+  type Sos,
+  type SosStats,
 } from "./services/api";
 
+import Sidebar from "./components/Sidebar";
+import Topbar from "./components/Topbar";
+
+import Dashboard from "./pages/Dashboard";
+import MapPage from "./pages/MapPage";
+import TeamManagement from "./pages/TeamManagement";
+import AssignTeam from "./pages/AssignTeam";
+import Notifications from "./pages/Notifications";
+
 function App() {
-  const [view, setView] = useState<"emergencies" | "responders">("emergencies");
+  const [activePage, setActivePage] = useState("dashboard");
+
   const [sosItems, setSosItems] = useState<Sos[]>([]);
   const [stats, setStats] = useState<SosStats | null>(null);
-  const [responders, setResponders] = useState<ResponderRegistration[]>([]);
-  const [teams, setTeams] = useState<RescueTeam[]>([]);
-  const [teamSelections, setTeamSelections] = useState<Record<string, string>>({});
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [workingId, setWorkingId] = useState<string | null>(null);
 
-  async function loadAll() {
-    setLoading(true); setError(null);
-    try {
-      const [sos, sosStats, registrations, rescueTeams] = await Promise.all([
-        getSosList(), getSosStats(), getResponders(), getRescueTeams(),
-      ]);
-      setSosItems(sos.items); setStats(sosStats);
-      setResponders(registrations.items); setTeams(rescueTeams.items);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to load SAHARA data.");
-    } finally { setLoading(false); }
-  }
+  const pageTitles: Record<string, string> = {
+    dashboard: "Dashboard",
+    map: "Live Map",
+    teams: "Team Management",
+    assign: "Assign Rescue Team",
+    notifications: "Notifications",
+  };
 
-  useEffect(() => { void loadAll(); }, []);
+  useEffect(() => {
+    async function loadSos() {
+      try {
+        const [sosData, statsData] = await Promise.all([
+          getSosList(),
+          getSosStats(),
+        ]);
 
-  async function approve(registration: ResponderRegistration) {
-    const teamId = teamSelections[registration.responderId];
-    if (!teamId) { setError("Select an official rescue team before approval."); return; }
-    setWorkingId(registration.responderId); setError(null);
-    try { await approveResponder(registration.responderId, teamId); await loadAll(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "Approval failed."); }
-    finally { setWorkingId(null); }
-  }
+        setSosItems(sosData.items);
+        setStats(statsData);
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Unknown error"
+        );
+      } finally {
+        setLoading(false);
+      }
+    }
 
-  async function reject(registration: ResponderRegistration) {
-    setWorkingId(registration.responderId); setError(null);
-    try { await rejectResponder(registration.responderId); await loadAll(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "Rejection failed."); }
-    finally { setWorkingId(null); }
-  }
+    loadSos();
+  }, []);
+
+  const renderPage = () => {
+    if (loading) {
+      return (
+        <div className="flex min-h-[300px] items-center justify-center">
+          <p className="text-sm text-gray-500">
+            Loading Sahara emergencies...
+          </p>
+        </div>
+      );
+    }
+
+    if (error) {
+      return (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-6">
+          <p className="font-medium text-red-600">
+            Unable to load emergency data
+          </p>
+
+          <p className="mt-1 text-sm text-red-500">
+            {error}
+          </p>
+        </div>
+      );
+    }
+
+    switch (activePage) {
+      case "map":
+        return <MapPage />;
+
+      case "teams":
+        return (
+          <TeamManagement
+            onAssign={() => setActivePage("assign")}
+          />
+        );
+
+      case "assign":
+        return (
+          <AssignTeam
+            onBack={() => setActivePage("teams")}
+          />
+        );
+
+      case "notifications":
+        return <Notifications />;
+
+      default:
+        return (
+          <Dashboard
+            sosItems={sosItems}
+            stats={stats}
+          />
+        );
+    }
+  };
 
   return (
-    <div className="shell">
-      <aside>
-        <div className="brand">SAHARA <span>Command</span></div>
-        <button className={view === "emergencies" ? "active" : ""} onClick={() => setView("emergencies")}>Emergencies</button>
-        <button className={view === "responders" ? "active" : ""} onClick={() => setView("responders")}>Responders</button>
-      </aside>
-      <main>
-        <header><div><small>SAHARA ADMIN</small><h1>{view === "responders" ? "Responder Management" : "Emergency Overview"}</h1></div><button onClick={() => void loadAll()}>Refresh</button></header>
-        {error && <div className="error">{error}</div>}
-        {loading ? <div className="empty">Loading command data…</div> : view === "responders" ? (
-          <>
-            <section><h2>Pending Requests</h2>
-              {responders.filter(r => r.status === "PENDING").length === 0 ? <div className="empty">No pending responder requests.</div> :
-                responders.filter(r => r.status === "PENDING").map(r => (
-                  <article className="request" key={r.responderId}>
-                    <div><span className="pill pending">PENDING</span><h3>{r.operatorName}</h3><p>{r.organization} • {r.district}</p><p>{r.phone}{r.email ? ` • ${r.email}` : ""}</p><code>{r.deviceId}</code></div>
-                    <div className="actions"><select value={teamSelections[r.responderId] ?? ""} onChange={e => setTeamSelections(s => ({...s, [r.responderId]: e.target.value}))}><option value="">Assign rescue team…</option>{teams.map(t => <option key={t.teamId} value={t.teamId}>{t.teamName} — {t.callsign}</option>)}</select><button disabled={workingId === r.responderId} onClick={() => void approve(r)}>Approve & Assign</button><button className="secondary" disabled={workingId === r.responderId} onClick={() => void reject(r)}>Reject</button></div>
-                  </article>
-                ))}
-            </section>
-            <section><h2>Official Rescue Teams</h2><div className="grid">{teams.map(t => <article className="card" key={t.teamId}><span className="pill approved">{t.status}</span><h3>{t.teamName}</h3><strong>{t.callsign}</strong><p>{t.district}, {t.province}</p><code>{t.teamId}</code></article>)}</div></section>
-            <section><h2>Registration History</h2><div className="grid">{responders.filter(r => r.status !== "PENDING").map(r => <article className="card" key={r.responderId}><span className={`pill ${r.status.toLowerCase()}`}>{r.status}</span><h3>{r.operatorName}</h3><p>{r.organization}</p><strong>{r.teamName ?? "No team assigned"}</strong><p>{r.responderId}</p></article>)}</div></section>
-          </>
-        ) : (
-          <><section className="stats">{stats && <><div><b>{stats.total}</b><span>Total SOS</span></div><div><b>{stats.new}</b><span>New</span></div><div><b>{stats.responding}</b><span>Responding</span></div><div><b>{stats.criticalActive}</b><span>Critical</span></div></>}</section><section><h2>Active SOS Messages</h2><div className="grid">{sosItems.map(s => <article className="card" key={s.id}><span className="pill pending">{s.priority}</span><h3>{s.type}</h3><p>{s.message ?? "No description"}</p><p>{s.latitude}, {s.longitude}</p><strong>{s.status}</strong></article>)}</div></section></>
-        )}
-      </main>
+    <div className="flex min-h-screen bg-gray-50 text-gray-900">
+
+      <Sidebar
+        activePage={activePage}
+        onNavigate={setActivePage}
+      />
+
+      <div className="flex min-w-0 flex-1 flex-col">
+
+        <Topbar
+          title={pageTitles[activePage] ?? "Dashboard"}
+        />
+
+        <main className="flex-1 overflow-auto p-6 lg:p-8">
+          {renderPage()}
+        </main>
+
+      </div>
     </div>
   );
 }
+
 export default App;
