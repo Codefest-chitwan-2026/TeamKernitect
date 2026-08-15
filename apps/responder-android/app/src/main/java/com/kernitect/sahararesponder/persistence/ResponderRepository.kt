@@ -29,6 +29,11 @@ class ResponderRepository(private val database: ResponderDatabase) {
     suspend fun saveProcessed(packetId: String, incidentId: String, type: String) =
         dao.upsertProcessed(ProcessedPacketEntity(packetId, incidentId, type, System.currentTimeMillis()))
 
+    suspend fun cloudSummary(): com.kernitect.sahararesponder.sync.CloudSyncSummary {
+        val states = dao.cloudRecords().map { com.kernitect.sahararesponder.sync.normalizeCloudState(it.backendSyncState) }
+        return com.kernitect.sahararesponder.sync.CloudSyncSummary(states.count { it == "PENDING" }, states.count { it == "SYNCING" }, states.count { it == "FAILED" })
+    }
+
     suspend fun saveOutgoing(packet: MeshOutgoingPacket, state: AckSendState, failure: String? = null, attempted: Boolean = false) {
         val old = dao.outgoing().firstOrNull { it.packetId == packet.id }
         dao.upsertOutgoing(OutgoingPacketEntity(packet.id, packet.incidentId, packet.type, packet.toJson(),

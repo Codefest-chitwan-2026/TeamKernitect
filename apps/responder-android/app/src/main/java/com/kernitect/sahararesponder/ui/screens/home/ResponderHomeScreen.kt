@@ -3,8 +3,7 @@ package com.kernitect.sahararesponder.ui.screens.home
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -16,6 +15,7 @@ import com.kernitect.sahararesponder.model.IncidentOwnership
 import com.kernitect.sahararesponder.model.ownershipOf
 import com.kernitect.sahararesponder.model.RescueLifecycleEvent
 import com.kernitect.sahararesponder.ui.components.*
+import com.kernitect.sahararesponder.sync.CloudSyncSummary
 
 private val activeStatuses = setOf("ACCEPTED", "ON_THE_WAY", "NEARBY", "ARRIVED")
 
@@ -29,6 +29,8 @@ fun ResponderHomeScreen(
     teamProfile: ResponderTeamProfile,
     claimsByIncident: Map<String, List<IncidentClaim>>,
     lifecycleEventsByIncident: Map<String, List<RescueLifecycleEvent>>,
+    cloudSyncSummary: CloudSyncSummary,
+    onSyncNow: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val newest = incidents.sortedByDescending { it.receivedAt }
@@ -47,6 +49,7 @@ fun ResponderHomeScreen(
         item { ResponderTopBar(newCount) }
         item { Box(Modifier.padding(horizontal = 20.dp)) { TeamIdentityCard(teamProfile) } }
         item { Box(Modifier.padding(horizontal = 20.dp)) { MeshStatusCard(meshStatus) } }
+        item { Box(Modifier.padding(horizontal = 20.dp)) { CloudSyncCard(cloudSyncSummary, onSyncNow) } }
         item { Box(Modifier.padding(horizontal = 20.dp)) { IncidentSummaryRow(newCount, activeCount, completedCount) } }
         item { SectionHeader("Priority Alert") }
         item { Box(Modifier.padding(horizontal = 20.dp)) { PriorityAlertCard(priorityIncident, onViewDetails) } }
@@ -70,6 +73,24 @@ fun ResponderHomeScreen(
                     CompactIncidentCard(incident, assignmentLabel = listOfNotNull(ownership.label(), progress).joinToString(" • ")) { onViewDetails(incident) }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun CloudSyncCard(summary: CloudSyncSummary, onSyncNow: () -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("CLOUD SYNC", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                Text(when {
+                    summary.syncing > 0 -> "Syncing • ${summary.syncing} updates"
+                    summary.failed > 0 -> "${summary.failed} sync failed • Retry"
+                    summary.pending > 0 -> "Offline or waiting • ${summary.pending} updates pending"
+                    else -> "Synced"
+                }, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (!summary.synced) OutlinedButton(onClick = onSyncNow) { Text("SYNC NOW") }
         }
     }
 }

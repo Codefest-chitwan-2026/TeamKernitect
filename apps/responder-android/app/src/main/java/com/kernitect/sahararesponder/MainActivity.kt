@@ -66,6 +66,7 @@ import com.kernitect.sahararesponder.ui.theme.SaharaResponderTheme
 import org.osmdroid.config.Configuration
 import org.json.JSONObject
 import com.kernitect.sahararesponder.persistence.*
+import com.kernitect.sahararesponder.sync.*
 
 class MainActivity : ComponentActivity() {
     private var meshStatus by mutableStateOf("Starting RESCUEMESH")
@@ -97,6 +98,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var repository: ResponderRepository
     private var operationalDataLoading by mutableStateOf(false)
     private var operationalRestoreStarted = false
+    private var cloudSyncSummary by mutableStateOf(CloudSyncSummary(0, 0, 0))
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
         if (hasRequiredPermissions()) startReceiverIfReady() else {
@@ -120,6 +122,9 @@ class MainActivity : ComponentActivity() {
         Configuration.getInstance().userAgentValue = packageName
         identityStore = ResponderIdentityStore(applicationContext)
         repository = ResponderRepository(ResponderDatabase.get(applicationContext))
+        androidx.work.WorkManager.getInstance(applicationContext)
+            .getWorkInfosForUniqueWorkLiveData(CloudSyncScheduler.UNIQUE_WORK)
+            .observe(this) { refreshCloudSummary() }
         teamProfile = identityStore.loadApprovedProfile()
         registration = identityStore.loadRegistration()
             ?: ResponderRegistration(deviceId = identityStore.getOrCreateDeviceId())
@@ -255,6 +260,8 @@ class MainActivity : ComponentActivity() {
                                 teamProfile = configuredTeam,
                                 claimsByIncident = claimsByIncident,
                                 lifecycleEventsByIncident = lifecycleEventsByIncident,
+                                cloudSyncSummary = cloudSyncSummary,
+                                onSyncNow = ::queueCloudSync,
                                 modifier = Modifier.padding(padding),
                             )
                             ResponderDestination.MAP -> ResponderMapScreen(
@@ -308,6 +315,8 @@ class MainActivity : ComponentActivity() {
                     if (it.packetType == RescueStatusPacket.TYPE) seenStatusIds.add(it.packetId)
                 }
                 restored.outgoing.forEach(::restoreOutgoing)
+                cloudSyncSummary = repository.cloudSummary()
+                if (!cloudSyncSummary.synced) CloudSyncScheduler.enqueue(applicationContext)
                 Log.i(TAG, "Restored ${restored.incidents.size} incidents from Room")
             }.onFailure {
                 Log.e(TAG, "Room restore failed", it)
@@ -316,6 +325,16 @@ class MainActivity : ComponentActivity() {
             operationalDataLoading = false
             startOperationalServices()
         }
+    }
+
+    private fun queueCloudSync() {
+        CloudSyncScheduler.enqueue(applicationContext)
+        lifecycleScope.launch { cloudSyncSummary = repository.cloudSummary() }
+        Log.i(TAG, "Cloud sync queued")
+    }
+
+    private fun refreshCloudSummary() {
+        lifecycleScope.launch { cloudSyncSummary = repository.cloudSummary() }
     }
 
     private fun restoreOutgoing(entity: OutgoingPacketEntity) {
@@ -553,6 +572,7 @@ class MainActivity : ComponentActivity() {
                     val claimRecord = ClaimRecord(claimPacket); val ackRecord = AckRecord(ackPacket)
                     claimRecords[incident.id] = claimRecord; ackRecords[incident.id] = ackRecord
                     Log.i(TAG, "Incident accepted and persisted: ${incident.id}")
+                    queueCloudSync()
                     sendClaim(claimRecord); sendAck(ackRecord)
                 }.onFailure { persistenceFailure("rescue acceptance", it) }
         }
@@ -579,6 +599,7 @@ class MainActivity : ComponentActivity() {
                 lifecycleEventsByIncident[incident.id] = recordLifecycleEvent(lifecycleEventsByIncident[incident.id].orEmpty(), event)
                 statusRecords[packet.id] = StatusRecord(packet)
                 Log.i(TAG, "Incident ${incident.id} -> ${next.name}; persisted ${packet.id}")
+                queueCloudSync()
                 sendStatus(statusRecords.getValue(packet.id))
             }.onFailure { persistenceFailure("lifecycle transition", it) }
         }
