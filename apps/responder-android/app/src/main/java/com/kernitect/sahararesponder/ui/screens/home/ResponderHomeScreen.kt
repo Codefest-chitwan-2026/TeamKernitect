@@ -19,6 +19,8 @@ fun ResponderHomeScreen(
     meshStatus: String,
     incidents: List<ResponderIncident>,
     onViewDetails: (ResponderIncident) -> Unit,
+    responderLocated: Boolean,
+    onOpenMap: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val newest = incidents.sortedByDescending { it.receivedAt }
@@ -40,7 +42,7 @@ fun ResponderHomeScreen(
         item { SectionHeader("Priority Alert") }
         item { Box(Modifier.padding(horizontal = 20.dp)) { PriorityAlertCard(priorityIncident, onViewDetails) } }
         item { SectionHeader("Situation Overview") }
-        item { Box(Modifier.padding(horizontal = 20.dp)) { SituationMapCard(incidents.size) } }
+        item { Box(Modifier.padding(horizontal = 20.dp)) { SituationMapCard(incidents.size, responderLocated, onOpenMap) } }
         item { SectionHeader("Recent Reports") }
         if (newest.isEmpty()) {
             item {

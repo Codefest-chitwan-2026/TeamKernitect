@@ -14,10 +14,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.kernitect.sahararesponder.model.ResponderIncident
+import com.kernitect.sahararesponder.location.RescueNavigationCalculator
+import com.kernitect.sahararesponder.location.ResponderLocation
 import com.kernitect.sahararesponder.ui.components.*
 
 @Composable
-fun IncidentDetailsScreen(incident: ResponderIncident, onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun IncidentDetailsScreen(
+    incident: ResponderIncident,
+    responderLocation: ResponderLocation?,
+    locationStatus: String,
+    onBack: () -> Unit,
+    onOpenMap: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val validVictim = RescueNavigationCalculator.isValidCoordinate(incident.latitude, incident.longitude)
+    val distance = responderLocation?.let { RescueNavigationCalculator.distanceMeters(it, incident.latitude, incident.longitude) }
+    val bearing = responderLocation?.let { RescueNavigationCalculator.bearingDegrees(it, incident.latitude, incident.longitude) }
     Column(modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, "Back to responder home") }
@@ -42,19 +54,23 @@ fun IncidentDetailsScreen(incident: ResponderIncident, onBack: () -> Unit, modif
                 DetailRow("Incident ID", incident.id)
             }
             DetailCard("Location") {
-                DetailRow("Latitude", incident.latitude.toString())
-                DetailRow("Longitude", incident.longitude.toString())
+                DetailRow("Latitude", if (validVictim) incident.latitude.toString() else "Unavailable")
+                DetailRow("Longitude", if (validVictim) incident.longitude.toString() else "Unavailable")
+                DetailRow("Responder GPS", responderLocation?.let { "%.6f, %.6f".format(it.latitude, it.longitude) } ?: locationStatus)
+                DetailRow("Straight-line distance", distance?.let { RescueNavigationCalculator.formatDistance(it) } ?: "Unavailable")
+                DetailRow("Direction", bearing?.let { "${RescueNavigationCalculator.bearingLabel(it)} • ${it.toInt()}°" } ?: "Unavailable")
                 Surface(Modifier.fillMaxWidth().height(140.dp), RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                        Icon(Icons.Filled.LocationOn, "Map placeholder", tint = CriticalRed, modifier = Modifier.size(36.dp))
-                        Text("Rescue map available next checkpoint", fontWeight = FontWeight.SemiBold)
-                        Text("${incident.latitude}, ${incident.longitude}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Icon(Icons.Filled.LocationOn, "Incident location", tint = CriticalRed, modifier = Modifier.size(36.dp))
+                        Text(if (validVictim) "Victim location ready" else "Victim coordinates unavailable", fontWeight = FontWeight.SemiBold)
+                        Text(if (validVictim) "${incident.latitude}, ${incident.longitude}" else "Map marker cannot be placed", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
+                Button(onClick = onOpenMap, enabled = validVictim, modifier = Modifier.fillMaxWidth()) { Text("OPEN FULL MAP") }
             }
             DetailCard("Rescue Status") {
                 DetailRow("Current status", incident.status)
-                Text("No responder has accepted this incident in Checkpoint 2.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("No responder has accepted this incident yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(Modifier.height(4.dp))
         }

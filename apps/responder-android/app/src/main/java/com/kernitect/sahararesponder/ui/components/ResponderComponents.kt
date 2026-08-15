@@ -123,7 +123,7 @@ fun PriorityAlertCard(incident: ResponderIncident?, onViewDetails: (ResponderInc
 }
 
 @Composable
-fun SituationMapCard(incidentCount: Int) {
+fun SituationMapCard(incidentCount: Int, responderLocated: Boolean, onOpenMap: () -> Unit) {
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F3F5))) {
         Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(Modifier.size(48.dp), RoundedCornerShape(14.dp), color = Color.White) {
@@ -132,10 +132,14 @@ fun SituationMapCard(incidentCount: Int) {
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text("Situation Map", fontWeight = FontWeight.Bold)
-                Text("$incidentCount incident${if (incidentCount == 1) "" else "s"}", style = MaterialTheme.typography.labelMedium, color = CriticalRed)
-                Text("Victim locations will appear on the rescue map.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    if (incidentCount == 0) "Waiting for SOS locations" else "$incidentCount incident location${if (incidentCount == 1) "" else "s"} available",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = CriticalRed,
+                )
+                Text(if (responderLocated) "Responder GPS available" else "Locating responder…", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
-            Text("Next checkpoint", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(onClick = onOpenMap) { Text("Open Map") }
         }
     }
 }
