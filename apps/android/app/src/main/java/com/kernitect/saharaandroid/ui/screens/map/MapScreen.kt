@@ -32,7 +32,8 @@ fun MapScreen(
     alerts: List<ReceivedAlert> = emptyList(),
     focusedAlert: ReceivedAlert? = null,
     unreadNotificationCount: Int = 0,
-    onNotificationClick: () -> Unit = {}
+    onNotificationClick: () -> Unit = {},
+    onBackClick: (() -> Unit)? = null
 ) {
 
     val context = LocalContext.current
@@ -43,10 +44,15 @@ fun MapScreen(
 
         SaharaTopBar(
             title = "Map",
+
             unreadCount =
                 unreadNotificationCount,
+
             onNotificationClick =
-                onNotificationClick
+                onNotificationClick,
+
+            onBackClick =
+                onBackClick
         )
 
         Box(

@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -27,8 +30,10 @@ fun SaharaTopBar(
     title: String,
     modifier: Modifier = Modifier,
     unreadCount: Int = 0,
-    onNotificationClick: () -> Unit = {}
+    onNotificationClick: () -> Unit = {},
+    onBackClick: (() -> Unit)? = null
 ) {
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -36,64 +41,115 @@ fun SaharaTopBar(
     ) {
 
         /*
-         * Sahara logo
+         * Back button when supplied.
+         *
+         * Otherwise show Sahara logo.
          */
-        Image(
-            painter = painterResource(
-                id = R.drawable.saharalogo
-            ),
-            contentDescription = "Sahara logo",
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .size(50.dp)
-        )
+        if (onBackClick != null) {
 
-        /*
-         * Screen title
-         */
+            IconButton(
+                onClick = onBackClick,
+                modifier = Modifier
+                    .align(
+                        Alignment.CenterStart
+                    )
+                    .size(50.dp)
+            ) {
+
+                Icon(
+                    imageVector =
+                        Icons.Default.ArrowBack,
+
+                    contentDescription =
+                        "Back",
+
+                    tint =
+                        Color.Black,
+
+                    modifier =
+                        Modifier.size(26.dp)
+                )
+            }
+
+        } else {
+
+            Image(
+                painter =
+                    painterResource(
+                        id = R.drawable.saharalogo
+                    ),
+
+                contentDescription =
+                    "Sahara logo",
+
+                modifier = Modifier
+                    .align(
+                        Alignment.CenterStart
+                    )
+                    .size(50.dp)
+            )
+        }
+
         Text(
             text = title,
-            modifier = Modifier.align(
-                Alignment.Center
-            ),
+
+            modifier =
+                Modifier.align(
+                    Alignment.Center
+                ),
+
             fontSize = 19.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color.Black
+
+            fontWeight =
+                FontWeight.Bold,
+
+            color =
+                Color.Black
         )
 
         /*
-         * Notification bell + badge
+         * Bell + unread badge.
          */
         Box(
             modifier = Modifier
-                .align(Alignment.CenterEnd)
+                .align(
+                    Alignment.CenterEnd
+                )
                 .size(50.dp)
         ) {
 
             IconButton(
-                onClick = onNotificationClick,
+                onClick =
+                    onNotificationClick,
+
                 modifier = Modifier
-                    .align(Alignment.Center)
+                    .align(
+                        Alignment.Center
+                    )
                     .size(50.dp)
             ) {
 
                 Image(
-                    painter = painterResource(
-                        id = R.drawable.bell
-                    ),
-                    contentDescription = "Notifications",
-                    modifier = Modifier.size(25.dp)
+                    painter =
+                        painterResource(
+                            id = R.drawable.bell
+                        ),
+
+                    contentDescription =
+                        "Notifications",
+
+                    modifier =
+                        Modifier.size(25.dp)
                 )
             }
 
-            /*
-             * Unread counter badge
-             */
             if (unreadCount > 0) {
 
                 Surface(
                     modifier = Modifier
-                        .align(Alignment.TopEnd)
+                        .align(
+                            Alignment.TopEnd
+                        )
                         .offset(
                             x = (-2).dp,
                             y = 3.dp
@@ -102,27 +158,43 @@ fun SaharaTopBar(
                             minWidth = 18.dp,
                             minHeight = 18.dp
                         ),
-                    shape = CircleShape,
-                    color = Color(0xFFE60000)
+
+                    shape =
+                        CircleShape,
+
+                    color =
+                        Color(0xFFE60000)
                 ) {
 
                     Box(
-                        modifier = Modifier.padding(
-                            horizontal = 4.dp
-                        ),
-                        contentAlignment = Alignment.Center
+                        modifier =
+                            Modifier.padding(
+                                horizontal = 4.dp
+                            ),
+
+                        contentAlignment =
+                            Alignment.Center
                     ) {
 
                         Text(
                             text =
-                                if (unreadCount > 99) {
+                                if (
+                                    unreadCount > 99
+                                ) {
                                     "99+"
                                 } else {
-                                    unreadCount.toString()
+                                    unreadCount
+                                        .toString()
                                 },
-                            color = Color.White,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
+
+                            color =
+                                Color.White,
+
+                            fontSize =
+                                10.sp,
+
+                            fontWeight =
+                                FontWeight.Bold
                         )
                     }
                 }
