@@ -62,5 +62,18 @@ data class RescueAckPacket(
             latitude = responderLocation?.latitude ?: 0.0,
             longitude = responderLocation?.longitude ?: 0.0,
         )
+
+        fun fromJson(raw: String): RescueAckPacket? = runCatching {
+            val j = JSONObject(raw)
+            if (j.optString("type") != "SOS_ACK") return null
+            RescueAckPacket(
+                id = j.getString("id"), incidentId = j.getString("incidentId"), responderId = j.getString("responderId"),
+                teamId = j.getString("teamId"), teamName = j.getString("teamName"), callsign = j.getString("callsign"),
+                deviceId = j.getString("deviceId"), district = j.getString("district"), timestamp = j.getLong("timestamp"),
+                priority = j.optString("priority", "NORMAL"), latitude = j.optDouble("latitude", 0.0),
+                longitude = j.optDouble("longitude", 0.0), hopCount = j.optInt("hopCount", 0), ttl = j.optInt("ttl", 5),
+                status = j.optString("status", "RESCUE_RECEIVED"), message = j.optString("message"),
+            ).takeIf { it.id.startsWith("ACK-") && it.incidentId.isNotBlank() && it.teamId.isNotBlank() }
+        }.getOrNull()
     }
 }

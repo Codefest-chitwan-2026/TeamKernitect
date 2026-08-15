@@ -24,6 +24,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import com.kernitect.sahararesponder.ble.ResponderBleAdvertiser
 import com.kernitect.sahararesponder.ble.ResponderBleServer
 import com.kernitect.sahararesponder.model.RescuePacket
@@ -63,6 +65,7 @@ import com.kernitect.sahararesponder.ui.screens.setup.ResponderRegistrationScree
 import com.kernitect.sahararesponder.ui.theme.SaharaResponderTheme
 import org.osmdroid.config.Configuration
 import org.json.JSONObject
+import com.kernitect.sahararesponder.persistence.*
 
 class MainActivity : ComponentActivity() {
     private var meshStatus by mutableStateOf("Starting RESCUEMESH")
@@ -91,6 +94,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var meshSender: ResponderMeshSender
     private lateinit var identityStore: ResponderIdentityStore
     private val responderApiClient = ResponderApiClient()
+    private lateinit var repository: ResponderRepository
+    private var operationalDataLoading by mutableStateOf(false)
+    private var operationalRestoreStarted = false
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
         if (hasRequiredPermissions()) startReceiverIfReady() else {
@@ -113,6 +119,7 @@ class MainActivity : ComponentActivity() {
         Configuration.getInstance().load(applicationContext, PreferenceManager.getDefaultSharedPreferences(applicationContext))
         Configuration.getInstance().userAgentValue = packageName
         identityStore = ResponderIdentityStore(applicationContext)
+        repository = ResponderRepository(ResponderDatabase.get(applicationContext))
         teamProfile = identityStore.loadApprovedProfile()
         registration = identityStore.loadRegistration()
             ?: ResponderRegistration(deviceId = identityStore.getOrCreateDeviceId())
@@ -136,13 +143,16 @@ class MainActivity : ComponentActivity() {
                 if (packet.type == RescueClaimPacket.TYPE) {
                     val existing = claimRecords[packet.incidentId] ?: return@runOnUiThread
                     claimRecords[packet.incidentId] = existing.copy(state = state, failureReason = failureReason)
+                    persistOutgoing(packet, state, failureReason)
                 } else if (packet.type == RescueStatusPacket.TYPE) {
                     val existing = statusRecords[packet.id] ?: return@runOnUiThread
                     statusRecords[packet.id] = existing.copy(state = state, failureReason = failureReason)
+                    persistOutgoing(packet, state, failureReason)
                     Log.i(TAG, if (state == AckSendState.SENT_TO_MESH) "Status written to mesh neighbor: ${packet.id}" else "Status ${state.name}: ${packet.id}")
                 } else {
                     val existing = ackRecords[packet.incidentId] ?: return@runOnUiThread
                     ackRecords[packet.incidentId] = existing.copy(state = state, failureReason = failureReason)
+                    persistOutgoing(packet, state, failureReason)
                 }
             }
         }
@@ -179,6 +189,10 @@ class MainActivity : ComponentActivity() {
                             error = "Approved response is missing official team information. Contact SAHARA command.",
                             onSubmit = ::submitRegistration,
                         )
+                    }
+                } else if (operationalDataLoading) {
+                    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        androidx.compose.material3.CircularProgressIndicator()
                     }
                 } else {
                 var destination by remember { mutableStateOf(ResponderDestination.HOME) }
@@ -266,13 +280,57 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        if (teamProfile != null) startOperationalServices()
+        if (teamProfile != null) restoreOperationalData()
     }
 
     private fun startOperationalServices() {
         val bluetoothDialogNeeded = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !hasAllBluetoothPermissions()
         ensurePermissionsAndStart()
         if (!bluetoothDialogNeeded) ensureLocationPermission()
+    }
+
+    private fun restoreOperationalData() {
+        if (operationalRestoreStarted) return
+        operationalRestoreStarted = true
+        operationalDataLoading = true
+        lifecycleScope.launch {
+            runCatching { repository.restore() }.onSuccess { restored ->
+                incidents.clear(); incidents.addAll(restored.incidents); seenPacketIds.addAll(restored.incidents.map { it.id })
+                claimsByIncident.clear(); restored.claims.groupBy { it.incidentId }.forEach { (id, claims) -> claimsByIncident[id] = claims }
+                lifecycleEventsByIncident.clear(); restored.events.groupBy({ it.first }, { it.second }).forEach { (id, events) ->
+                    lifecycleEventsByIncident[id] = events
+                    statusesByIncident[id] = events.filter { it.status !in setOf(RescueLifecycle.NEW, RescueLifecycle.ACCEPTED) }.map {
+                        RescueStatusEvent(it.sourcePacketId, id, "RESTORED", it.teamId, it.teamName, it.callsign, it.status.name, 0.0, 0.0, it.timestamp)
+                    }
+                }
+                restored.processed.forEach {
+                    if (it.packetType == RescueClaimPacket.TYPE) seenClaimIds.add(it.packetId)
+                    if (it.packetType == RescueStatusPacket.TYPE) seenStatusIds.add(it.packetId)
+                }
+                restored.outgoing.forEach(::restoreOutgoing)
+                Log.i(TAG, "Restored ${restored.incidents.size} incidents from Room")
+            }.onFailure {
+                Log.e(TAG, "Room restore failed", it)
+                identityError = "Saved rescue data could not be loaded."
+            }
+            operationalDataLoading = false
+            startOperationalServices()
+        }
+    }
+
+    private fun restoreOutgoing(entity: OutgoingPacketEntity) {
+        val state = runCatching { AckSendState.valueOf(entity.sendState) }.getOrDefault(AckSendState.FAILED)
+        when (entity.packetType) {
+            RescueClaimPacket.TYPE -> RescueClaimPacket.fromJson(entity.payloadJson)?.let { claimRecords[it.incidentId] = ClaimRecord(it, state, entity.failureReason) }
+            RescueStatusPacket.TYPE -> RescueStatusPacket.fromJson(entity.payloadJson)?.let { statusRecords[it.id] = StatusRecord(it, state, entity.failureReason) }
+            "SOS_ACK" -> RescueAckPacket.fromJson(entity.payloadJson)?.let { ackRecords[it.incidentId] = AckRecord(it, state, entity.failureReason) }
+        }
+        if (state == AckSendState.FAILED) Log.i(TAG, "Restored retryable packet ${entity.packetId}")
+    }
+
+    private fun persistOutgoing(packet: com.kernitect.sahararesponder.model.MeshOutgoingPacket, state: AckSendState, failure: String?) {
+        lifecycleScope.launch { runCatching { repository.saveOutgoing(packet, state, failure, state == AckSendState.SEARCHING) }
+            .onFailure { Log.e(TAG, "Failed to persist outgoing ${packet.id}", it) } }
     }
 
     private fun submitRegistration(request: ResponderRegistration) {
@@ -311,7 +369,7 @@ class MainActivity : ComponentActivity() {
         if (approved != null) {
             teamProfile = approved
             identityError = null
-            startOperationalServices()
+            restoreOperationalData()
         }
     }
 
@@ -395,10 +453,13 @@ class MainActivity : ComponentActivity() {
                 return@runOnUiThread
             }
             Log.i(TAG, "SOS parsed: ${packet.id}, priority=${packet.priority}")
-            incidents.add(0, ResponderIncident.fromPacket(packet))
+            val received = ResponderIncident.fromPacket(packet)
+            incidents.add(0, received)
             latestStatusByTeam(statusesByIncident[packet.id].orEmpty()).values
                 .sortedBy { RescueLifecycle.parse(it.status)?.rank }
                 .forEach { applyDisplayedStatus(packet.id, it.teamId, it.status) }
+            val persistedIncident = incidents.first { it.id == packet.id }
+            lifecycleScope.launch { runCatching { repository.saveIncident(persistedIncident) }.onFailure { persistenceFailure("incident ${packet.id}", it) } }
             meshStatus = "SOS received"
         }
     }
@@ -416,6 +477,13 @@ class MainActivity : ComponentActivity() {
                 applyDisplayedStatus(packet.incidentId, packet.teamId, it.status)
             }
             Log.i(TAG, "Claim received: ${packet.id} for ${packet.incidentId}")
+            lifecycleScope.launch {
+                runCatching {
+                    repository.saveClaim(packet.asClaim())
+                    lifecycleEventsByIncident[packet.incidentId]?.lastOrNull { it.sourcePacketId == packet.id }?.let { repository.saveEvent(packet.incidentId, it) }
+                    repository.saveProcessed(packet.id, packet.incidentId, packet.type)
+                }.onFailure { persistenceFailure("claim ${packet.id}", it) }
+            }
             if (packet.canRelay() && hasOutgoingScanPermission()) meshSender.send(packet.nextHop())
         }
     }
@@ -439,6 +507,13 @@ class MainActivity : ComponentActivity() {
                 recordEvent(packet.incidentId, packet.status, packet.timestamp, packet.teamId, packet.teamName, packet.callsign, packet.id)
                 applyDisplayedStatus(packet.incidentId, packet.teamId, packet.status)
                 Log.i(TAG, "Received RESCUE_STATUS ${packet.id}: ${packet.status}")
+            }
+            lifecycleScope.launch {
+                runCatching {
+                    lifecycleEventsByIncident[packet.incidentId]?.lastOrNull { it.sourcePacketId == packet.id }?.let { repository.saveEvent(packet.incidentId, it) }
+                    repository.saveProcessed(packet.id, packet.incidentId, packet.type)
+                    incidents.firstOrNull { it.id == packet.incidentId }?.let { repository.saveIncident(it) }
+                }.onFailure { persistenceFailure("status ${packet.id}", it) }
             }
             if (packet.canRelay() && hasOutgoingScanPermission()) meshSender.send(packet.nextHop())
         }
@@ -464,29 +539,24 @@ class MainActivity : ComponentActivity() {
         val index = incidents.indexOfFirst { it.id == incident.id }
         if (index < 0) return incident
         if (ownershipOf(claimsByIncident[incident.id].orEmpty(), configuredTeam.teamId) != IncidentOwnership.UNCLAIMED) return incident
-        identityError = null
         val accepted = incident.copy(status = "ACCEPTED")
-        incidents[index] = accepted
-        Log.i(TAG, "Incident accepted: ${incident.id}")
-        val claimRecord = claimRecords.getOrPut(incident.id) {
-            ClaimRecord(RescueClaimPacket.create(accepted, responderLocation, configuredTeam)).also {
-                seenClaimIds.add(it.packet.id)
-                claimsByIncident[incident.id] = claimsByIncident[incident.id].orEmpty() + it.packet.asClaim()
-                Log.i(TAG, "Claim created: ${it.packet.id}")
-            }
+        val claimPacket = RescueClaimPacket.create(accepted, responderLocation, configuredTeam)
+        val ackPacket = RescueAckPacket.create(accepted, responderLocation, configuredTeam)
+        val event = RescueLifecycleEvent(RescueLifecycle.ACCEPTED, claimPacket.timestamp, configuredTeam.teamId, configuredTeam.teamName, configuredTeam.callsign, claimPacket.id)
+        lifecycleScope.launch {
+            runCatching { repository.persistAcceptance(accepted, claimPacket.asClaim(), event, claimPacket, ackPacket) }
+                .onSuccess {
+                    identityError = null; incidents[index] = accepted
+                    seenClaimIds.add(claimPacket.id)
+                    claimsByIncident[incident.id] = claimsByIncident[incident.id].orEmpty() + claimPacket.asClaim()
+                    lifecycleEventsByIncident[incident.id] = recordLifecycleEvent(lifecycleEventsByIncident[incident.id].orEmpty(), event)
+                    val claimRecord = ClaimRecord(claimPacket); val ackRecord = AckRecord(ackPacket)
+                    claimRecords[incident.id] = claimRecord; ackRecords[incident.id] = ackRecord
+                    Log.i(TAG, "Incident accepted and persisted: ${incident.id}")
+                    sendClaim(claimRecord); sendAck(ackRecord)
+                }.onFailure { persistenceFailure("rescue acceptance", it) }
         }
-        recordEvent(
-            incident.id, RescueLifecycle.ACCEPTED.name, claimRecord.packet.timestamp,
-            configuredTeam.teamId, configuredTeam.teamName, configuredTeam.callsign, claimRecord.packet.id,
-        )
-        val record = ackRecords.getOrPut(incident.id) {
-            AckRecord(RescueAckPacket.create(accepted, responderLocation, configuredTeam)).also {
-                Log.i(TAG, "ACK created: ${it.packet.id}")
-            }
-        }
-        sendClaim(claimRecord)
-        sendAck(record)
-        return accepted
+        return incident
     }
 
     private fun advanceLifecycle(incident: ResponderIncident, next: RescueLifecycle) {
@@ -500,14 +570,18 @@ class MainActivity : ComponentActivity() {
         val index = incidents.indexOfFirst { it.id == incident.id }
         if (index < 0) return
         val updated = incidents[index].copy(status = next.name)
-        incidents[index] = updated
         val packet = RescueStatusPacket.create(updated, next, responderLocation, profile)
-        seenStatusIds.add(packet.id)
-        statusesByIncident[incident.id] = statusesByIncident[incident.id].orEmpty() + packet.asEvent()
-        recordEvent(incident.id, next.name, packet.timestamp, profile.teamId, profile.teamName, profile.callsign, packet.id)
-        statusRecords[packet.id] = StatusRecord(packet)
-        Log.i(TAG, "Incident ${incident.id} -> ${next.name}; created ${packet.id}")
-        sendStatus(statusRecords.getValue(packet.id))
+        val event = RescueLifecycleEvent(next, packet.timestamp, profile.teamId, profile.teamName, profile.callsign, packet.id)
+        lifecycleScope.launch {
+            runCatching { repository.persistTransition(updated, event, packet) }.onSuccess {
+                incidents[index] = updated; seenStatusIds.add(packet.id)
+                statusesByIncident[incident.id] = statusesByIncident[incident.id].orEmpty() + packet.asEvent()
+                lifecycleEventsByIncident[incident.id] = recordLifecycleEvent(lifecycleEventsByIncident[incident.id].orEmpty(), event)
+                statusRecords[packet.id] = StatusRecord(packet)
+                Log.i(TAG, "Incident ${incident.id} -> ${next.name}; persisted ${packet.id}")
+                sendStatus(statusRecords.getValue(packet.id))
+            }.onFailure { persistenceFailure("lifecycle transition", it) }
+        }
     }
 
     private fun recordEvent(
@@ -534,6 +608,7 @@ class MainActivity : ComponentActivity() {
     private fun sendStatus(record: StatusRecord) {
         if (!hasOutgoingScanPermission()) {
             statusRecords[record.packet.id] = record.copy(state = AckSendState.FAILED, failureReason = "Bluetooth scan permission required")
+            persistOutgoing(record.packet, AckSendState.FAILED, "Bluetooth scan permission required")
             Log.w(TAG, "Status send failed: ${record.packet.id}")
             return
         }
@@ -548,6 +623,7 @@ class MainActivity : ComponentActivity() {
     private fun sendClaim(record: ClaimRecord) {
         if (!hasOutgoingScanPermission()) {
             claimRecords[record.packet.incidentId] = record.copy(state = AckSendState.FAILED, failureReason = "Bluetooth scan permission required")
+            persistOutgoing(record.packet, AckSendState.FAILED, "Bluetooth scan permission required")
             return
         }
         meshSender.send(record.packet)
@@ -565,12 +641,18 @@ class MainActivity : ComponentActivity() {
                 state = AckSendState.FAILED,
                 failureReason = "Bluetooth scan permission required",
             )
+            persistOutgoing(record.packet, AckSendState.FAILED, "Bluetooth scan permission required")
             return
         }
         meshSender.send(record.packet)
     }
 
     private fun postStatus(status: String) = runOnUiThread { meshStatus = status }
+
+    private fun persistenceFailure(operation: String, error: Throwable) {
+        Log.e(TAG, "Room persistence failed for $operation", error)
+        identityError = "Could not save $operation. Please try again before closing the app."
+    }
 
     private fun hasRequiredPermissions(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
