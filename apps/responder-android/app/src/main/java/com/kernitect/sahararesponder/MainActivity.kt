@@ -62,15 +62,20 @@ import com.kernitect.sahararesponder.mesh.ResponderMeshSender
 import com.kernitect.sahararesponder.location.ResponderLocation
 import com.kernitect.sahararesponder.location.ResponderLocationProvider
 import com.kernitect.sahararesponder.ui.components.ResponderBottomBar
+import com.kernitect.sahararesponder.ui.components.SecurityBottomSheet
 import com.kernitect.sahararesponder.ui.navigation.ResponderDestination
 import com.kernitect.sahararesponder.ui.screens.active.ActiveRescuesScreen
 import com.kernitect.sahararesponder.ui.screens.home.ResponderHomeScreen
 import com.kernitect.sahararesponder.ui.screens.incident.IncidentDetailsScreen
 import com.kernitect.sahararesponder.ui.screens.map.ResponderMapScreen
 import com.kernitect.sahararesponder.ui.screens.notifications.ResponderNotificationsScreen
+import com.kernitect.sahararesponder.ui.screens.reports.ReportHistoryScreen
 import com.kernitect.sahararesponder.ui.screens.setup.PendingApprovalScreen
 import com.kernitect.sahararesponder.ui.screens.setup.RejectedRegistrationScreen
 import com.kernitect.sahararesponder.ui.screens.setup.ResponderRegistrationScreen
+import com.kernitect.sahararesponder.ui.screens.setup.ResponderLoginScreen
+import com.kernitect.sahararesponder.ui.screens.setup.OfflinePinSetupScreen
+import com.kernitect.sahararesponder.ui.screens.setup.OfflineUnlockScreen
 import com.kernitect.sahararesponder.ui.theme.SaharaResponderTheme
 import org.osmdroid.config.Configuration
 import org.json.JSONObject
@@ -106,6 +111,10 @@ class MainActivity : ComponentActivity() {
     private var registration by mutableStateOf<ResponderRegistration?>(null)
     private var registrationLoading by mutableStateOf(false)
     private var registrationError by mutableStateOf<String?>(null)
+    private var registrationMode by mutableStateOf(false)
+    private var authLocked by mutableStateOf(false)
+    private var pinSetupRequired by mutableStateOf(false)
+    private var offlinePinError by mutableStateOf<String?>(null)
     private lateinit var bleServer: ResponderBleServer
     private lateinit var bleAdvertiser: ResponderBleAdvertiser
     private lateinit var locationProvider: ResponderLocationProvider
@@ -140,6 +149,7 @@ class MainActivity : ComponentActivity() {
         Configuration.getInstance().load(applicationContext, PreferenceManager.getDefaultSharedPreferences(applicationContext))
         Configuration.getInstance().userAgentValue = packageName
         identityStore = ResponderIdentityStore(applicationContext)
+        authLocked = identityStore.isLocked()
         notificationSeenStore = ResponderNotificationSeenStore(applicationContext)
         seenNotificationIds = notificationSeenStore.load()
         repository = ResponderRepository(ResponderDatabase.get(applicationContext))
@@ -198,16 +208,17 @@ class MainActivity : ComponentActivity() {
         setContent {
             SaharaResponderTheme {
                 val configuredTeam = teamProfile
-                if (configuredTeam == null) {
+                if (configuredTeam != null && authLocked) {
+                    OfflineUnlockScreen(configuredTeam.teamName, configuredTeam.callsign, offlinePinError, ::unlockOffline)
+                } else if (configuredTeam != null && pinSetupRequired) {
+                    OfflinePinSetupScreen(configuredTeam.teamName, ::saveOfflinePin)
+                } else if (configuredTeam == null) {
                     val account = registration ?: ResponderRegistration(identityStore.getOrCreateDeviceId())
                     when (account.status) {
-                        ResponderRegistrationStatus.UNREGISTERED -> ResponderRegistrationScreen(
-                            deviceId = account.deviceId,
-                            initial = account,
-                            loading = registrationLoading,
-                            error = registrationError,
-                            onSubmit = ::submitRegistration,
-                        )
+                        ResponderRegistrationStatus.UNREGISTERED -> if (registrationMode) ResponderRegistrationScreen(
+                            deviceId = account.deviceId, initial = account, loading = registrationLoading,
+                            error = registrationError, onSubmit = ::submitRegistration,
+                        ) else ResponderLoginScreen(account.deviceId, registrationLoading, registrationError, ::login, { registrationMode = true; registrationError = null })
                         ResponderRegistrationStatus.PENDING -> PendingApprovalScreen(
                             registration = account,
                             loading = registrationLoading,
@@ -221,13 +232,7 @@ class MainActivity : ComponentActivity() {
                             onRetry = { registration = account.copy(status = ResponderRegistrationStatus.UNREGISTERED) },
                             onCheckStatus = ::checkRegistrationStatus,
                         )
-                        ResponderRegistrationStatus.APPROVED -> ResponderRegistrationScreen(
-                            deviceId = account.deviceId,
-                            initial = account,
-                            loading = registrationLoading,
-                            error = "Approved response is missing official team information. Contact SAHARA command.",
-                            onSubmit = ::submitRegistration,
-                        )
+                        ResponderRegistrationStatus.APPROVED -> ResponderLoginScreen(account.deviceId, registrationLoading, registrationError, ::login, { registrationMode = true })
                     }
                 } else if (operationalDataLoading) {
                     androidx.compose.foundation.layout.Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
@@ -244,13 +249,16 @@ class MainActivity : ComponentActivity() {
                 }
                 var selectedIncident by remember { mutableStateOf<ResponderIncident?>(null) }
                 var focusedMapIncident by remember { mutableStateOf<ResponderIncident?>(null) }
+                var showSecurity by remember { mutableStateOf(false) }
+                var showReportHistory by remember { mutableStateOf(false) }
                 BackHandler(enabled = focusedMapIncident != null) { focusedMapIncident = null }
                 BackHandler(enabled = focusedMapIncident == null && selectedIncident != null) { selectedIncident = null }
+                BackHandler(enabled = focusedMapIncident == null && selectedIncident == null && showReportHistory) { showReportHistory = false }
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
                     bottomBar = {
                         if (selectedIncident == null && focusedMapIncident == null) {
-                            ResponderBottomBar(destination) { destination = it }
+                            ResponderBottomBar(destination, { destination = it; showReportHistory = false }, { showSecurity = true })
                         }
                     },
                 ) { padding ->
@@ -293,6 +301,13 @@ class MainActivity : ComponentActivity() {
                             onRetryStatus = { retryStatus(selected.id) },
                             modifier = Modifier.padding(padding),
                         )
+                    } else if (showReportHistory) {
+                        ReportHistoryScreen(
+                            reports = incidents,
+                            onBack = { showReportHistory = false },
+                            onOpenReport = { selectedIncident = it },
+                            modifier = Modifier.padding(padding),
+                        )
                     } else {
                         when (destination) {
                             ResponderDestination.HOME -> ResponderHomeScreen(
@@ -311,6 +326,7 @@ class MainActivity : ComponentActivity() {
                                     responderNotifications(incidents, lifecycleEventsByIncident),
                                     seenNotificationIds,
                                 ),
+                                onSeeMoreReports = { showReportHistory = true },
                                 modifier = Modifier.padding(padding),
                             )
                             ResponderDestination.MAP -> ResponderMapScreen(
@@ -340,6 +356,13 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+                if (showSecurity) SecurityBottomSheet(
+                    offlinePinConfigured = identityStore.hasOfflinePin(),
+                    onDismiss = { showSecurity = false },
+                    onSetOfflinePin = { showSecurity = false; pinSetupRequired = true },
+                    onLockApp = ::lockApp,
+                    onRemoveAccount = ::removeAccount,
+                )
                 }
             }
         }
@@ -420,6 +443,46 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun login(email: String, password: String) {
+        if (registrationLoading) return
+        registrationLoading = true; registrationError = null
+        responderApiClient.login(email, password, identityStore.getOrCreateDeviceId()) { result ->
+            registrationLoading = false
+            result.onSuccess(::applyRegistration).onFailure { registrationError = it.message ?: "Unable to reach SAHARA login service." }
+        }
+    }
+
+    private fun saveOfflinePin(pin: String) {
+        identityStore.configureOfflinePin(pin)
+        identityStore.unlockApp()
+        pinSetupRequired = false
+        authLocked = false
+        offlinePinError = null
+    }
+
+    private fun lockApp() {
+        if (!identityStore.hasOfflinePin()) { pinSetupRequired = true; return }
+        if (identityStore.lockApp()) { authLocked = true; offlinePinError = null }
+    }
+
+    private fun unlockOffline(pin: String) {
+        if (!identityStore.verifyOfflinePin(pin)) { offlinePinError = "Incorrect Offline Responder PIN."; return }
+        identityStore.unlockApp()
+        authLocked = false
+        offlinePinError = null
+    }
+
+    private fun removeAccount() {
+        identityStore.removeAccount()
+        teamProfile = null
+        registration = ResponderRegistration(identityStore.getOrCreateDeviceId())
+        registrationMode = false
+        registrationError = null
+        authLocked = false
+        pinSetupRequired = false
+        offlinePinError = null
+    }
+
     private fun checkRegistrationStatus() {
         val current = registration ?: return
         if (registrationLoading) return
@@ -441,8 +504,11 @@ class MainActivity : ComponentActivity() {
             registrationError = "Approval response did not include a complete official team assignment."
             return
         }
-        if (approved != null) {
+        if (approved != null && !account.authToken.isNullOrBlank()) {
             teamProfile = approved
+            authLocked = false
+            identityStore.unlockApp()
+            pinSetupRequired = !identityStore.hasOfflinePin()
             identityError = null
             restoreOperationalData()
         }

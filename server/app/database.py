@@ -47,6 +47,7 @@ async def ensure_indexes() -> None:
     )
     await responders_collection.create_index("responderId", unique=True)
     await responders_collection.create_index("deviceId", unique=True)
+    await responders_collection.create_index("leaderEmailNormalized", unique=True, sparse=True)
     await rescue_teams_collection.create_index("teamId", unique=True)
     await responder_rescue_events_collection.create_index("eventId", unique=True)
     await responder_rescue_events_collection.create_index([("incidentId", 1), ("eventTimestamp", 1)])

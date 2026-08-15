@@ -15,20 +15,27 @@ class ResponderApiClient {
     fun register(registration: ResponderRegistration, callback: (Result<ResponderRegistration>) -> Unit) {
         val body = JSONObject().apply {
             put("deviceId", registration.deviceId)
-            put("operatorName", registration.operatorName)
-            put("organization", registration.organization)
-            put("phone", registration.phone)
-            put("email", registration.email.ifBlank { JSONObject.NULL })
+            put("teamName", registration.organization)
+            put("callsign", registration.callsign)
             put("district", registration.district)
+            put("leaderName", registration.operatorName)
+            put("leaderPhone", registration.phone)
+            put("leaderEmail", registration.email)
+            put("password", registration.password)
         }.toString()
         request("/responders/register", "POST", body, registration.deviceId, callback)
+    }
+
+    fun login(email: String, password: String, deviceId: String, callback: (Result<ResponderRegistration>) -> Unit) {
+        val body = JSONObject().put("leaderEmail", email).put("password", password).put("deviceId", deviceId).toString()
+        request("/responders/login", "POST", body, deviceId, callback, loginResponse = true)
     }
 
     fun checkStatus(deviceId: String, callback: (Result<ResponderRegistration>) -> Unit) {
         request("/responders/device/${URLEncoder.encode(deviceId, Charsets.UTF_8.name())}", "GET", null, deviceId, callback)
     }
 
-    private fun request(path: String, method: String, body: String?, deviceId: String, callback: (Result<ResponderRegistration>) -> Unit) {
+    private fun request(path: String, method: String, body: String?, deviceId: String, callback: (Result<ResponderRegistration>) -> Unit, loginResponse: Boolean = false) {
         Thread {
             val result = runCatching {
                 val connection = (URL(ResponderApiConfig.BASE_URL + path).openConnection() as HttpURLConnection).apply {
@@ -48,7 +55,9 @@ class ResponderApiClient {
                         val detail = runCatching { JSONObject(response).optString("detail") }.getOrNull()
                         error(detail?.takeIf { it.isNotBlank() } ?: "Registration service returned ${connection.responseCode}.")
                     }
-                    parseRegistration(JSONObject(response), deviceId)
+                    val json = JSONObject(response)
+                    if (loginResponse) parseRegistration(json.getJSONObject("profile"), deviceId).copy(authToken = json.getString("accessToken"))
+                    else parseRegistration(json, deviceId)
                 } finally { connection.disconnect() }
             }
             mainHandler.post { callback(result) }

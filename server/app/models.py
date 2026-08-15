@@ -72,15 +72,23 @@ class ResponderStatus(str, Enum):
 
 class ResponderRegistrationRequest(BaseModel):
     deviceId: str = Field(min_length=8, max_length=100)
-    operatorName: str = Field(min_length=1, max_length=100)
-    organization: str = Field(min_length=1, max_length=150)
-    phone: str = Field(min_length=1, max_length=40)
-    email: str | None = Field(default=None, max_length=150)
+    teamName: str = Field(min_length=1, max_length=150)
+    callsign: str = Field(min_length=1, max_length=60)
     district: str = Field(min_length=1, max_length=100)
+    leaderName: str = Field(min_length=1, max_length=100)
+    leaderPhone: str = Field(min_length=1, max_length=40)
+    leaderEmail: str = Field(min_length=3, max_length=150)
+    password: str = Field(min_length=8, max_length=200)
+
+
+class ResponderLoginRequest(BaseModel):
+    leaderEmail: str = Field(min_length=3, max_length=150)
+    password: str = Field(min_length=1, max_length=200)
+    deviceId: str = Field(min_length=8, max_length=100)
 
 
 class ResponderApprovalRequest(BaseModel):
-    teamId: str = Field(min_length=1, max_length=100)
+    teamId: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class ResponderRejectionRequest(BaseModel):

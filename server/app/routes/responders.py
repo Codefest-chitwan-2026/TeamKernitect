@@ -9,12 +9,14 @@ from app.database import responders_collection, rescue_teams_collection, respond
 from app.models import (
     ResponderApprovalRequest,
     ResponderRegistrationRequest,
+    ResponderLoginRequest,
     ResponderRejectionRequest,
     ResponderStatus,
     ResponderRescueEventType,
     ResponderRescueSyncRequest,
     ResponderRescueSyncResponse,
 )
+from app.auth import create_access_token, hash_password, normalize_email, verify_password
 
 router = APIRouter(prefix="/responders", tags=["Responders"])
 
@@ -36,23 +38,36 @@ def has_same_event_semantics(stored: dict, candidate: dict) -> bool:
 
 def public_profile(document: dict) -> dict:
     return {key: document.get(key) for key in (
-        "responderId", "deviceId", "operatorName", "organization", "phone",
-        "email", "district", "status", "teamId", "teamName", "callsign",
-        "createdAt", "approvedAt", "rejectionReason",
+        "responderId", "deviceId", "operatorName", "organization", "phone", "email",
+        "leaderName", "leaderPhone", "leaderEmail", "district", "status", "teamId",
+        "teamName", "callsign", "createdAt", "approvedAt", "rejectedAt", "rejectionReason",
     )}
 
 
 @router.post("/register")
 async def register_responder(request: ResponderRegistrationRequest):
+    email = normalize_email(request.leaderEmail)
+    if "@" not in email or email.startswith("@") or email.endswith("@"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Enter a valid leader email address.")
+    duplicate = await responders_collection.find_one({"leaderEmailNormalized": email, "deviceId": {"$ne": request.deviceId}})
+    if duplicate is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A rescue team is already registered with this email.")
     existing = await responders_collection.find_one({"deviceId": request.deviceId})
     if existing is not None:
-        if existing.get("status") == ResponderStatus.REJECTED.value:
+        if existing.get("status") == ResponderStatus.REJECTED.value or not existing.get("passwordHash"):
+            values = request.model_dump(exclude={"password"})
+            next_status = ResponderStatus.PENDING.value if existing.get("status") == ResponderStatus.REJECTED.value else existing.get("status")
             existing = await responders_collection.find_one_and_update(
                 {"deviceId": request.deviceId},
                 {"$set": {
-                    **request.model_dump(),
-                    "status": ResponderStatus.PENDING.value,
+                    **values,
+                    "operatorName": request.leaderName, "organization": request.teamName,
+                    "phone": request.leaderPhone, "email": email,
+                    "leaderEmail": email, "leaderEmailNormalized": email,
+                    "passwordHash": hash_password(request.password),
+                    "status": next_status,
                     "rejectionReason": None,
+                    "rejectedAt": None,
                     "createdAt": datetime.now(timezone.utc),
                 }},
                 return_document=ReturnDocument.AFTER,
@@ -60,19 +75,39 @@ async def register_responder(request: ResponderRegistrationRequest):
         return public_profile(existing)
 
     now = datetime.now(timezone.utc)
-    document = request.model_dump()
+    document = request.model_dump(exclude={"password"})
     document.update({
         "responderId": f"RESP-{uuid4().hex[:8].upper()}",
+        "teamId": f"TEAM-{uuid4().hex[:10].upper()}",
+        "operatorName": request.leaderName,
+        "organization": request.teamName,
+        "phone": request.leaderPhone,
+        "email": email,
+        "leaderEmail": email,
+        "leaderEmailNormalized": email,
+        "passwordHash": hash_password(request.password),
         "status": ResponderStatus.PENDING.value,
-        "teamId": None,
-        "teamName": None,
-        "callsign": None,
         "createdAt": now,
         "approvedAt": None,
+        "rejectedAt": None,
         "rejectionReason": None,
     })
     await responders_collection.insert_one(document)
     return public_profile(document)
+
+
+@router.post("/login")
+async def login_responder(request: ResponderLoginRequest):
+    document = await responders_collection.find_one({"leaderEmailNormalized": normalize_email(request.leaderEmail)})
+    if document is None or not verify_password(request.password, document.get("passwordHash", "")):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
+    if document.get("status") == ResponderStatus.PENDING.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Your team is awaiting administrator verification.")
+    if document.get("status") == ResponderStatus.REJECTED.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Your team registration was rejected.")
+    if document.get("status") != ResponderStatus.APPROVED.value or not document.get("teamId"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Responder account is not approved.")
+    return {"accessToken": create_access_token(document["responderId"], document["teamId"]), "profile": public_profile(document)}
 
 
 @router.get("/device/{device_id}")
@@ -87,7 +122,7 @@ async def get_responder_by_device(device_id: str):
 async def list_responders(status_filter: ResponderStatus | None = Query(default=None, alias="status")):
     query = {} if status_filter is None else {"status": status_filter.value}
     items = await responders_collection.find(query, {"_id": 0}).sort("createdAt", -1).to_list(length=200)
-    return {"count": len(items), "items": items}
+    return {"count": len(items), "items": [public_profile(item) for item in items]}
 
 
 @router.get("/teams")
@@ -164,9 +199,17 @@ async def sync_responder_rescue(request: ResponderRescueSyncRequest):
 
 @router.patch("/{responder_id}/approve")
 async def approve_responder(responder_id: str, request: ResponderApprovalRequest):
-    team = await rescue_teams_collection.find_one({"teamId": request.teamId})
-    if team is None:
+    responder = await responders_collection.find_one({"responderId": responder_id})
+    if responder is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Responder not found.")
+    team_id = request.teamId or responder.get("teamId")
+    team = await rescue_teams_collection.find_one({"teamId": team_id})
+    if team is None and request.teamId:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected rescue team does not exist.")
+    if team is None:
+        team = {"teamId": team_id, "teamName": responder.get("teamName"), "callsign": responder.get("callsign"),
+                "province": "", "district": responder.get("district"), "status": "AVAILABLE"}
+        await rescue_teams_collection.update_one({"teamId": team_id}, {"$setOnInsert": team}, upsert=True)
     now = datetime.now(timezone.utc)
     document = await responders_collection.find_one_and_update(
         {"responderId": responder_id},
@@ -184,7 +227,7 @@ async def approve_responder(responder_id: str, request: ResponderApprovalRequest
     )
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Responder not found.")
-    return document
+    return public_profile(document)
 
 
 @router.patch("/{responder_id}/reject")
@@ -194,9 +237,7 @@ async def reject_responder(responder_id: str, request: ResponderRejectionRequest
         {"$set": {
             "status": ResponderStatus.REJECTED.value,
             "rejectionReason": request.reason or "Registration rejected by SAHARA administrator.",
-            "teamId": None,
-            "teamName": None,
-            "callsign": None,
+            "rejectedAt": datetime.now(timezone.utc),
             "approvedAt": None,
         }},
         projection={"_id": 0},
@@ -204,4 +245,4 @@ async def reject_responder(responder_id: str, request: ResponderRejectionRequest
     )
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Responder not found.")
-    return document
+    return public_profile(document)

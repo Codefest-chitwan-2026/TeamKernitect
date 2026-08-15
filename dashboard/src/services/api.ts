@@ -173,6 +173,11 @@ export interface ResponderRegistration {
   callsign?: string | null;
   createdAt?: string;
   rejectionReason?: string | null;
+  leaderName?: string;
+  leaderPhone?: string;
+  leaderEmail?: string;
+  approvedAt?: string | null;
+  rejectedAt?: string | null;
 }
 
 export interface RescueTeam {
@@ -195,9 +200,9 @@ async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const getResponders = () => apiRequest<{ count: number; items: ResponderRegistration[] }>("/responders");
 export const getRescueTeams = () => apiRequest<{ count: number; items: RescueTeam[] }>("/responders/teams");
-export const approveResponder = (responderId: string, teamId: string) => apiRequest<ResponderRegistration>(
+export const approveResponder = (responderId: string, teamId?: string) => apiRequest<ResponderRegistration>(
   `/responders/${encodeURIComponent(responderId)}/approve`,
-  { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ teamId }) },
+  { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(teamId ? { teamId } : {}) },
 );
 export const rejectResponder = (responderId: string) => apiRequest<ResponderRegistration>(
   `/responders/${encodeURIComponent(responderId)}/reject`,
