@@ -18,6 +18,7 @@ interface IncidentDao {
     @Query(
         """
         SELECT * FROM incidents
+        WHERE isLocalOrigin = 0
         ORDER BY receivedAt DESC
         """
     )
@@ -42,6 +43,40 @@ interface IncidentDao {
     )
 
 
+    @Query(
+        """
+        SELECT * FROM incidents
+        WHERE isLocalOrigin = 1
+        ORDER BY receivedAt DESC
+        """
+    )
+    fun observeLocalIncidents():
+            Flow<List<IncidentEntity>>
+
+
+    @Query(
+        """
+        SELECT * FROM incidents
+        WHERE id = :incidentId AND isLocalOrigin = 1
+        LIMIT 1
+        """
+    )
+    suspend fun findLocalIncident(
+        incidentId: String
+    ): IncidentEntity?
+
+
+    @Query(
+        """
+        DELETE FROM incidents
+        WHERE id = :incidentId AND isLocalOrigin = 1
+        """
+    )
+    suspend fun deleteLocalIncident(
+        incidentId: String
+    )
+
+
     /*
      * Bell unread badge.
      */
@@ -49,7 +84,7 @@ interface IncidentDao {
         """
         SELECT COUNT(*)
         FROM incidents
-        WHERE isRead = 0
+        WHERE isRead = 0 AND isLocalOrigin = 0
         """
     )
     fun observeUnreadCount():

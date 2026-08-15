@@ -102,6 +102,12 @@ class MainActivity : ComponentActivity() {
                     }
 
 
+                val trackingEventDao =
+                    remember(database) {
+                        database.trackingEventDao()
+                    }
+
+
                 val coroutineScope =
                     rememberCoroutineScope()
 
@@ -128,6 +134,24 @@ class MainActivity : ComponentActivity() {
                         initial =
                             0
                     )
+
+
+                val localIncidents by
+                incidentDao
+                    .observeLocalIncidents()
+                    .collectAsState(initial = emptyList())
+
+
+                val trackingEvents by
+                trackingEventDao
+                    .observeAllEvents()
+                    .collectAsState(initial = emptyList())
+
+
+                val responderDistances by
+                MeshServiceState
+                    .responderDistances
+                    .collectAsState()
 
 
                 val receivedAlerts =
@@ -677,6 +701,18 @@ class MainActivity : ComponentActivity() {
                         unreadNotificationCount,
 
 
+                    localIncidents =
+                        localIncidents,
+
+
+                    trackingEvents =
+                        trackingEvents,
+
+
+                    responderDistances =
+                        responderDistances,
+
+
                     incomingAlert =
                         activeIncomingAlert,
 
@@ -745,6 +781,10 @@ class MainActivity : ComponentActivity() {
 
                                 val thisRequest =
                                     requestGeneration
+
+
+                                val requestCreatedAt =
+                                    System.currentTimeMillis()
 
 
                                 activeRequestIsCritical =
@@ -842,7 +882,13 @@ class MainActivity : ComponentActivity() {
                                                         areaSeverity =
                                                             matchedAlert
                                                                 ?.severity
-                                                                ?: RescuePacket.SEVERITY_UNKNOWN
+                                                                ?: RescuePacket.SEVERITY_UNKNOWN,
+
+                                                        requestCreatedAt =
+                                                            requestCreatedAt,
+
+                                                        locationAttachedAt =
+                                                            System.currentTimeMillis()
                                                     )
                                             }
                                         },
@@ -928,6 +974,10 @@ class MainActivity : ComponentActivity() {
                                     requestGeneration
 
 
+                                val requestCreatedAt =
+                                    System.currentTimeMillis()
+
+
                                 activeRequestIsCritical =
                                     false
 
@@ -991,7 +1041,13 @@ class MainActivity : ComponentActivity() {
                                                             peopleCount,
 
                                                         explanation =
-                                                            explanation
+                                                            explanation,
+
+                                                        requestCreatedAt =
+                                                            requestCreatedAt,
+
+                                                        locationAttachedAt =
+                                                            System.currentTimeMillis()
                                                     )
                                             }
                                         },

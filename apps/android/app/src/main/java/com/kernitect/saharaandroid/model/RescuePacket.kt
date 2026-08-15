@@ -37,7 +37,17 @@ data class RescuePacket(
      * containing the sender.
      */
     val areaSeverity: String =
-        SEVERITY_UNKNOWN
+        SEVERITY_UNKNOWN,
+
+    /*
+     * Present on responder acknowledgement, status, and location
+     * packets. This always points to the original citizen SOS ID.
+     */
+    val incidentId: String? = null,
+
+    val rescueStatus: String? = null,
+
+    val responderAccuracyMeters: Float? = null
 ) {
 
     fun toJson(): String =
@@ -102,6 +112,18 @@ data class RescuePacket(
                 areaSeverity
             )
 
+            incidentId?.let {
+                put("incidentId", it)
+            }
+
+            rescueStatus?.let {
+                put("status", it)
+            }
+
+            responderAccuracyMeters?.let {
+                put("responderAccuracyMeters", it)
+            }
+
         }.toString()
 
 
@@ -133,6 +155,28 @@ data class RescuePacket(
 
         const val TYPE_SOS =
             "SOS"
+
+        const val TYPE_SOS_ACK =
+            "SOS_ACK"
+
+        const val TYPE_RESCUE_STATUS =
+            "RESCUE_STATUS"
+
+        const val TYPE_RESPONDER_LOCATION =
+            "RESPONDER_LOCATION"
+
+
+        const val STATUS_RESPONDER_RECEIVED =
+            "RESPONDER_RECEIVED"
+
+        const val STATUS_ON_THE_WAY =
+            "ON_THE_WAY"
+
+        const val STATUS_ARRIVED =
+            "ARRIVED"
+
+        const val STATUS_RESCUED =
+            "RESCUED"
 
 
         const val PRIORITY_NORMAL =
@@ -172,6 +216,9 @@ data class RescuePacket(
             latitude: Double,
 
             longitude: Double,
+
+            timestamp: Long =
+                System.currentTimeMillis(),
 
             likelyDisaster: String =
                 DISASTER_UNKNOWN,
@@ -235,7 +282,7 @@ data class RescuePacket(
                     longitude,
 
                 timestamp =
-                    System.currentTimeMillis(),
+                    timestamp,
 
                 hopCount =
                     0,
@@ -279,7 +326,10 @@ data class RescuePacket(
 
             peopleCount: String,
 
-            explanation: String
+            explanation: String,
+
+            timestamp: Long =
+                System.currentTimeMillis()
 
         ): RescuePacket {
 
@@ -324,7 +374,7 @@ data class RescuePacket(
                     longitude,
 
                 timestamp =
-                    System.currentTimeMillis(),
+                    timestamp,
 
                 hopCount =
                     0,
@@ -346,6 +396,63 @@ data class RescuePacket(
 
                 areaSeverity =
                     SEVERITY_UNKNOWN
+            )
+        }
+
+
+        /*
+         * Responder-side helpers. These create real mesh packets;
+         * the citizen timeline changes only after receiving one.
+         */
+        fun createResponderStatus(
+            incidentId: String,
+            status: String,
+            timestamp: Long = System.currentTimeMillis()
+        ): RescuePacket {
+
+            val packetType =
+                if (status == STATUS_RESPONDER_RECEIVED) {
+                    TYPE_SOS_ACK
+                } else {
+                    TYPE_RESCUE_STATUS
+                }
+
+            return RescuePacket(
+                id = UUID.randomUUID().toString(),
+                type = packetType,
+                latitude = 0.0,
+                longitude = 0.0,
+                timestamp = timestamp,
+                hopCount = 0,
+                ttl = DEFAULT_TTL,
+                priority = PRIORITY_HIGH,
+                message = status,
+                incidentId = incidentId,
+                rescueStatus = status
+            )
+        }
+
+
+        fun createResponderLocation(
+            incidentId: String,
+            latitude: Double,
+            longitude: Double,
+            accuracyMeters: Float,
+            timestamp: Long = System.currentTimeMillis()
+        ): RescuePacket {
+
+            return RescuePacket(
+                id = UUID.randomUUID().toString(),
+                type = TYPE_RESPONDER_LOCATION,
+                latitude = latitude,
+                longitude = longitude,
+                timestamp = timestamp,
+                hopCount = 0,
+                ttl = DEFAULT_TTL,
+                priority = PRIORITY_HIGH,
+                message = "Responder location update",
+                incidentId = incidentId,
+                responderAccuracyMeters = accuracyMeters
             )
         }
 
@@ -440,7 +547,41 @@ data class RescuePacket(
                         obj.optString(
                             "areaSeverity",
                             SEVERITY_UNKNOWN
-                        )
+                        ),
+
+                    incidentId =
+                        obj.optString(
+                            "incidentId"
+                        ).takeIf {
+                            it.isNotBlank()
+                        },
+
+                    rescueStatus =
+                        obj.optString(
+                            "status",
+                            obj.optString("rescueStatus")
+                        ).takeIf {
+                            it.isNotBlank()
+                        },
+
+                    responderAccuracyMeters =
+                        if (
+                            (
+                                    obj.has("responderAccuracyMeters") &&
+                                    !obj.isNull("responderAccuracyMeters")
+                                    ) ||
+                            (
+                                    obj.has("accuracyMeters") &&
+                                    !obj.isNull("accuracyMeters")
+                                    )
+                        ) {
+                            obj.optDouble(
+                                "responderAccuracyMeters",
+                                obj.optDouble("accuracyMeters")
+                            ).toFloat()
+                        } else {
+                            null
+                        }
                 )
 
             } catch (_: Exception) {

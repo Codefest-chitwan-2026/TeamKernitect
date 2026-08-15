@@ -8,15 +8,18 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.kernitect.saharaandroid.data.local.dao.IncidentDao
 import com.kernitect.saharaandroid.data.local.dao.PublicAlertDao
+import com.kernitect.saharaandroid.data.local.dao.TrackingEventDao
 import com.kernitect.saharaandroid.data.local.entity.IncidentEntity
 import com.kernitect.saharaandroid.data.local.entity.PublicAlertEntity
+import com.kernitect.saharaandroid.data.local.entity.TrackingEventEntity
 
 @Database(
     entities = [
         IncidentEntity::class,
-        PublicAlertEntity::class
+        PublicAlertEntity::class,
+        TrackingEventEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class SaharaDatabase : RoomDatabase() {
@@ -24,6 +27,8 @@ abstract class SaharaDatabase : RoomDatabase() {
     abstract fun incidentDao(): IncidentDao
 
     abstract fun publicAlertDao(): PublicAlertDao
+
+    abstract fun trackingEventDao(): TrackingEventDao
 
     companion object {
 
@@ -75,6 +80,54 @@ abstract class SaharaDatabase : RoomDatabase() {
 
 
         /*
+         * Database version 2 → 3
+         *
+         * Adds citizen-originated incident identification and the
+         * persistent rescue activity timeline. Existing incidents
+         * remain incoming incidents because the new flag defaults false.
+         */
+        private val MIGRATION_2_3 =
+            object : Migration(2, 3) {
+
+                override fun migrate(
+                    db: SupportSQLiteDatabase
+                ) {
+
+                    db.execSQL(
+                        "ALTER TABLE `incidents` " +
+                                "ADD COLUMN `isLocalOrigin` INTEGER NOT NULL DEFAULT 0"
+                    )
+
+                    db.execSQL(
+                        """
+                        CREATE TABLE IF NOT EXISTS `tracking_events` (
+                            `id` TEXT NOT NULL,
+                            `incidentId` TEXT NOT NULL,
+                            `type` TEXT NOT NULL,
+                            `title` TEXT NOT NULL,
+                            `description` TEXT,
+                            `timestamp` INTEGER NOT NULL,
+                            `distanceMeters` REAL,
+                            PRIMARY KEY(`id`)
+                        )
+                        """.trimIndent()
+                    )
+
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_tracking_events_incidentId` " +
+                                "ON `tracking_events` (`incidentId`)"
+                    )
+
+                    db.execSQL(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS " +
+                                "`index_tracking_events_incidentId_type` " +
+                                "ON `tracking_events` (`incidentId`, `type`)"
+                    )
+                }
+            }
+
+
+        /*
          * Seed alerts when the database
          * is created for the first time.
          */
@@ -110,7 +163,8 @@ abstract class SaharaDatabase : RoomDatabase() {
                             "sahara_database"
                         )
                             .addMigrations(
-                                MIGRATION_1_2
+                                MIGRATION_1_2,
+                                MIGRATION_2_3
                             )
                             .addCallback(
                                 DATABASE_CALLBACK
