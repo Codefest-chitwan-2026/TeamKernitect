@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import com.kernitect.saharaandroid.data.local.entity.PublicAlertEntity
 import com.kernitect.saharaandroid.model.ReceivedAlert
 import com.kernitect.saharaandroid.model.WitnessReport
 import com.kernitect.saharaandroid.ui.components.IncomingAlertBanner
@@ -28,7 +29,15 @@ import com.kernitect.saharaandroid.ui.screens.notifications.NotificationsScreen
 
 @Composable
 fun SaharaApp(
+
     onCriticalSos: () -> Unit,
+
+    /*
+     * Active public emergency alert
+     * matched against this phone's location.
+     */
+    publicAlert: PublicAlertEntity? =
+        null,
 
     receivedAlerts: List<ReceivedAlert> =
         emptyList(),
@@ -50,61 +59,104 @@ fun SaharaApp(
         peopleCount: String,
         explanation: String
     ) -> Unit = { _, _, _ -> }
+
 ) {
 
     /*
-     * Current screen.
+     * ==========================================
+     * CURRENT SCREEN
+     * ==========================================
      */
     var currentDestination by remember {
+
         mutableStateOf(
             AppDestination.HOME
         )
     }
 
+
     /*
-     * Which SOS/help request the Map screen
+     * ==========================================
+     * FOCUSED RESCUEMESH INCIDENT
+     * ==========================================
+     *
+     * Specific SOS/help request the Map screen
      * should focus on.
      */
     var focusedMapAlert by remember {
+
         mutableStateOf<ReceivedAlert?>(
             null
         )
     }
 
+
     /*
-     * Incident selected from the
-     * Notifications screen.
+     * ==========================================
+     * FOCUSED PUBLIC EMERGENCY ALERT
+     * ==========================================
+     *
+     * Selected when the citizen presses MAP
+     * on the Home Emergency Alert card.
+     */
+    var focusedPublicAlert by remember {
+
+        mutableStateOf<PublicAlertEntity?>(
+            null
+        )
+    }
+
+
+    /*
+     * ==========================================
+     * SELECTED INCIDENT
+     * ==========================================
+     *
+     * Incident selected from Notifications.
      */
     var selectedIncident by remember {
+
         mutableStateOf<ReceivedAlert?>(
             null
         )
     }
 
+
     /*
+     * ==========================================
+     * MAP BACK DESTINATION
+     * ==========================================
+     *
      * If Map was opened from Incident Details,
      * this tells the Map where Back should go.
      *
-     * null = normal map navigation
+     * null = normal Map navigation.
      */
     var mapBackDestination by remember {
+
         mutableStateOf<AppDestination?>(
             null
         )
     }
 
+
     /*
-     * TEMPORARY LOCAL WITNESS REPORTS.
+     * ==========================================
+     * TEMPORARY WITNESS REPORTS
+     * ==========================================
      *
-     * These currently only live on this phone.
+     * LOCAL ONLY FOR NOW.
      *
-     * Later we will send them through
-     * RESCUEMESH as real witness packets.
+     * Later these can become real
+     * RESCUEMESH packets.
      */
     val witnessReports =
+
         remember {
+
             mutableStateListOf<WitnessReport>()
         }
+
 
     Box(
         modifier =
@@ -112,38 +164,54 @@ fun SaharaApp(
     ) {
 
         Scaffold(
+
             containerColor =
                 Color.White,
 
+
+            /*
+             * ==========================================
+             * BOTTOM NAVIGATION
+             * ==========================================
+             */
             bottomBar = {
 
                 /*
-                 * Hide bottom navigation on
-                 * Notifications and Incident Details.
+                 * Hide bottom navigation on:
                  *
-                 * If the Map was opened from
-                 * Incident Details, hide it there too
-                 * because we have a Back button.
+                 * - Notifications
+                 * - Incident Details
+                 * - Map opened from Incident Details
                  */
                 val hideBottomNavigation =
+
                     currentDestination ==
                             AppDestination.NOTIFICATIONS ||
+
                             currentDestination ==
                             AppDestination.INCIDENT_DETAILS ||
+
                             (
                                     currentDestination ==
                                             AppDestination.MAP &&
                                             mapBackDestination != null
                                     )
 
-                if (!hideBottomNavigation) {
+
+                if (
+                    !hideBottomNavigation
+                ) {
 
                     BottomNavigationBar(
+
                         currentDestination =
                             currentDestination,
 
+
                         /*
+                         * =================================
                          * HOME
+                         * =================================
                          */
                         onHomeClick = {
 
@@ -154,32 +222,52 @@ fun SaharaApp(
                                 AppDestination.HOME
                         },
 
+
                         /*
+                         * =================================
                          * BIG CRITICAL SOS BUTTON
+                         * =================================
                          */
                         onSosClick =
                             onCriticalSos,
 
+
                         /*
+                         * =================================
                          * NORMAL MAP NAVIGATION
+                         * =================================
+                         *
+                         * This is different from the MAP
+                         * button on the public Emergency
+                         * Alert card.
                          */
                         onMapClick = {
 
                             /*
-                             * Focus the newest alert
-                             * if one exists.
+                             * Normal Map tab should not
+                             * force-focus a public warning.
+                             */
+                            focusedPublicAlert =
+                                null
+
+
+                            /*
+                             * Focus newest received
+                             * SOS/help request if one exists.
                              */
                             focusedMapAlert =
                                 receivedAlerts
                                     .firstOrNull()
 
+
                             /*
-                             * Since this came from the
-                             * bottom navigation, Map does
-                             * not need a Back button.
+                             * Since this came from bottom
+                             * navigation, Map does not need
+                             * a Back button.
                              */
                             mapBackDestination =
                                 null
+
 
                             currentDestination =
                                 AppDestination.MAP
@@ -187,7 +275,10 @@ fun SaharaApp(
                     )
                 }
             }
-        ) { innerPadding ->
+
+        ) {
+                innerPadding ->
+
 
             Box(
                 modifier =
@@ -203,32 +294,55 @@ fun SaharaApp(
                 ) {
 
                     /*
-                     * =========================
+                     * =====================================
                      * HOME
-                     * =========================
+                     * =====================================
                      */
                     AppDestination.HOME -> {
 
                         HomeScreen(
+
                             /*
-                             * MAP button on the
+                             * Active public disaster alert.
+                             */
+                            publicAlert =
+                                publicAlert,
+
+
+                            /*
+                             * MAP button on the red
                              * Emergency Alert card.
                              */
                             onMapClick = {
 
+                                /*
+                                 * Focus the PUBLIC alert,
+                                 * not an unrelated SOS.
+                                 */
+                                focusedPublicAlert =
+                                    publicAlert
+
+
+                                /*
+                                 * Clear any previous
+                                 * victim incident focus.
+                                 */
                                 focusedMapAlert =
-                                    receivedAlerts
-                                        .firstOrNull()
+                                    null
+
 
                                 mapBackDestination =
                                     null
+
 
                                 currentDestination =
                                     AppDestination.MAP
                             },
 
+
                             unreadNotificationCount =
                                 unreadNotificationCount,
+
 
                             /*
                              * Bell icon.
@@ -237,51 +351,76 @@ fun SaharaApp(
 
                                 onNotificationsOpened()
 
+
                                 currentDestination =
                                     AppDestination.NOTIFICATIONS
                             },
 
+
                             /*
-                             * Middle help form.
+                             * Normal Help Request form.
                              */
                             onSendHelpRequest =
                                 onNonEmergencyRequest
                         )
                     }
 
+
                     /*
-                     * =========================
+                     * =====================================
                      * HELP
-                     * =========================
+                     * =====================================
                      */
                     AppDestination.HELP -> {
 
                         HelpScreen()
                     }
 
+
                     /*
-                     * =========================
+                     * =====================================
                      * MAP
-                     * =========================
+                     * =====================================
                      */
                     AppDestination.MAP -> {
 
                         MapScreen(
+
                             /*
-                             * Show all received
-                             * incidents as markers.
+                             * All received SOS/help
+                             * incidents shown as markers.
                              */
                             alerts =
                                 receivedAlerts,
 
+
                             /*
-                             * Zoom into this specific one.
+                             * Specific victim incident
+                             * the camera should focus on.
                              */
                             focusedAlert =
                                 focusedMapAlert,
 
+
+                            /*
+                             * Current public emergency
+                             * warning shown on the map.
+                             */
+                            publicAlert =
+                                publicAlert,
+
+
+                            /*
+                             * Public alert specifically
+                             * selected from Home.
+                             */
+                            focusedPublicAlert =
+                                focusedPublicAlert,
+
+
                             unreadNotificationCount =
                                 unreadNotificationCount,
+
 
                             /*
                              * Bell icon from Map.
@@ -290,26 +429,31 @@ fun SaharaApp(
 
                                 onNotificationsOpened()
 
+
                                 mapBackDestination =
                                     null
+
 
                                 currentDestination =
                                     AppDestination.NOTIFICATIONS
                             },
 
+
                             /*
-                             * Only exists when the Map
-                             * was opened from something
-                             * such as Incident Details.
+                             * Only exists when Map was
+                             * opened from Incident Details.
                              */
                             onBackClick =
+
                                 mapBackDestination
                                     ?.let {
                                             destination ->
 
                                         {
+
                                             currentDestination =
                                                 destination
+
 
                                             mapBackDestination =
                                                 null
@@ -318,16 +462,19 @@ fun SaharaApp(
                         )
                     }
 
+
                     /*
-                     * =========================
+                     * =====================================
                      * NOTIFICATIONS
-                     * =========================
+                     * =====================================
                      */
                     AppDestination.NOTIFICATIONS -> {
 
                         NotificationsScreen(
+
                             alerts =
                                 receivedAlerts,
+
 
                             onBackClick = {
 
@@ -335,14 +482,17 @@ fun SaharaApp(
                                     AppDestination.HOME
                             },
 
+
                             /*
                              * View Details →
                              */
                             onViewDetails = {
                                     alert ->
 
+
                                 selectedIncident =
                                     alert
+
 
                                 currentDestination =
                                     AppDestination.INCIDENT_DETAILS
@@ -350,27 +500,34 @@ fun SaharaApp(
                         )
                     }
 
+
                     /*
-                     * =========================
+                     * =====================================
                      * INCIDENT DETAILS
-                     * =========================
+                     * =====================================
                      */
                     AppDestination.INCIDENT_DETAILS -> {
 
                         val incident =
                             selectedIncident
 
-                        if (incident != null) {
+
+                        if (
+                            incident != null
+                        ) {
 
                             IncidentDetailsScreen(
+
                                 alert =
                                     incident,
 
+
                                 /*
                                  * Only show witness reports
-                                 * belonging to this SOS.
+                                 * belonging to this incident.
                                  */
                                 witnessReports =
+
                                     witnessReports
                                         .filter {
                                                 report ->
@@ -378,6 +535,7 @@ fun SaharaApp(
                                             report.incidentId ==
                                                     incident.packet.id
                                         },
+
 
                                 /*
                                  * Back to Notifications.
@@ -388,26 +546,38 @@ fun SaharaApp(
                                         AppDestination.NOTIFICATIONS
                                 },
 
+
                                 /*
                                  * Open this exact incident
                                  * on the full Map screen.
                                  */
                                 onOpenFullMap = {
 
+                                    /*
+                                     * We are opening a victim
+                                     * incident, not a public
+                                     * emergency warning.
+                                     */
+                                    focusedPublicAlert =
+                                        null
+
+
                                     focusedMapAlert =
                                         incident
 
+
                                     /*
-                                     * This makes Map show
-                                     * a Back arrow that returns
-                                     * here.
+                                     * Map now knows Back should
+                                     * return to Incident Details.
                                      */
                                     mapBackDestination =
                                         AppDestination.INCIDENT_DETAILS
 
+
                                     currentDestination =
                                         AppDestination.MAP
                                 },
+
 
                                 /*
                                  * Add witness details.
@@ -419,19 +589,28 @@ fun SaharaApp(
                                         peopleCount,
                                         explanation ->
 
+
                                     witnessReports.add(
-                                        index = 0,
+
+                                        index =
+                                            0,
+
 
                                         element =
+
                                             WitnessReport(
+
                                                 incidentId =
                                                     incident.packet.id,
+
 
                                                 disasterType =
                                                     disasterType,
 
+
                                                 peopleCount =
                                                     peopleCount,
+
 
                                                 message =
                                                     explanation
@@ -444,9 +623,6 @@ fun SaharaApp(
 
                             /*
                              * Safety fallback.
-                             *
-                             * Normally this should
-                             * never happen.
                              */
                             currentDestination =
                                 AppDestination.NOTIFICATIONS
@@ -456,37 +632,45 @@ fun SaharaApp(
             }
         }
 
+
         /*
-         * =====================================
+         * ==========================================
          * IN-APP SOS HEADS-UP ALERT
-         * =====================================
+         * ==========================================
          *
-         * This stays above whatever screen
+         * Appears above whichever screen
          * is currently open.
          */
         incomingAlert?.let {
                 alert ->
 
+
             IncomingAlertBanner(
+
                 alert =
                     alert,
 
+
                 /*
-                 * Clicking the popup opens
+                 * Clicking popup opens
                  * Notifications.
                  */
                 onClick = {
 
                     onIncomingAlertDismissed()
 
+
                     onNotificationsOpened()
+
 
                     mapBackDestination =
                         null
 
+
                     currentDestination =
                         AppDestination.NOTIFICATIONS
                 },
+
 
                 /*
                  * Countdown completed.
@@ -495,6 +679,7 @@ fun SaharaApp(
 
                     onIncomingAlertDismissed()
                 },
+
 
                 modifier =
                     Modifier

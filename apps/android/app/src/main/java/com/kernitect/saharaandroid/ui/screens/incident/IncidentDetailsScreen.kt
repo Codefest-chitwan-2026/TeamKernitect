@@ -1,123 +1,118 @@
 package com.kernitect.saharaandroid.ui.screens.incident
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Surface
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
-import android.view.MotionEvent
-import androidx.compose.ui.draw.clip
-import com.kernitect.saharaandroid.R
 import com.kernitect.saharaandroid.model.ReceivedAlert
+import com.kernitect.saharaandroid.model.RescuePacket
 import com.kernitect.saharaandroid.model.WitnessReport
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
-import org.osmdroid.util.GeoPoint
-import org.osmdroid.views.MapView
-import org.osmdroid.views.overlay.Marker
+import com.kernitect.saharaandroid.ui.components.SaharaTopBar
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-
 @Composable
 fun IncidentDetailsScreen(
+
     alert: ReceivedAlert,
 
-    witnessReports: List<WitnessReport>,
+    witnessReports: List<WitnessReport> =
+        emptyList(),
 
-    onBackClick: () -> Unit,
+    onBackClick: () -> Unit =
+        {},
 
-    onOpenFullMap: () -> Unit,
+    onOpenFullMap: () -> Unit =
+        {},
 
     onAddDetails: (
         disasterType: String,
         peopleCount: String,
         explanation: String
-    ) -> Unit
+    ) -> Unit = { _, _, _ -> }
+
 ) {
-
-    var showAddDetailsDialog by remember {
-        mutableStateOf(false)
-    }
-
-    /*
-     * Witness form.
-     */
-    var disasterType by remember {
-        mutableStateOf("")
-    }
-
-    var peopleCount by remember {
-        mutableStateOf("")
-    }
-
-    var explanation by remember {
-        mutableStateOf("")
-    }
-
-    var mapIsBeingTouched by remember {
-        mutableStateOf(false)
-    }
-
-    val screenScrollState =
-        rememberScrollState()
 
     val packet =
         alert.packet
 
-    val critical =
+    val isCritical =
         packet.priority ==
-                "CRITICAL"
+                RescuePacket.PRIORITY_CRITICAL
+
+
+    /*
+     * Witness form.
+     */
+    var disasterType by
+    remember(
+        packet.id
+    ) {
+
+        mutableStateOf(
+            ""
+        )
+    }
+
+
+    var peopleCount by
+    remember(
+        packet.id
+    ) {
+
+        mutableStateOf(
+            ""
+        )
+    }
+
+
+    var explanation by
+    remember(
+        packet.id
+    ) {
+
+        mutableStateOf(
+            ""
+        )
+    }
+
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(
-                state = screenScrollState,
-                enabled = !mapIsBeingTouched
-            )
-            .padding(
-                horizontal = 14.dp,
-                vertical = 8.dp
-            ),
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(
+                    rememberScrollState()
+                )
+                .padding(
+                    start = 14.dp,
+                    end = 14.dp,
+                    bottom = 24.dp
+                ),
 
         verticalArrangement =
             Arrangement.spacedBy(
@@ -126,58 +121,23 @@ fun IncidentDetailsScreen(
     ) {
 
         /*
-         * Header
+         * =====================================
+         * TOP BAR
+         * =====================================
          */
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(50.dp)
-        ) {
+        SaharaTopBar(
+            title =
+                "Incident Details",
 
-            IconButton(
-                onClick =
-                    onBackClick,
+            onBackClick =
+                onBackClick
+        )
 
-                modifier =
-                    Modifier.align(
-                        Alignment.CenterStart
-                    )
-            ) {
-
-                Icon(
-                    imageVector =
-                        Icons.Default.ArrowBack,
-
-                    contentDescription =
-                        "Back",
-
-                    tint =
-                        Color.Black
-                )
-            }
-
-            Text(
-                text =
-                    "Incident Details",
-
-                modifier =
-                    Modifier.align(
-                        Alignment.Center
-                    ),
-
-                fontSize =
-                    19.sp,
-
-                fontWeight =
-                    FontWeight.Bold,
-
-                color =
-                    Color.Black
-            )
-        }
 
         /*
-         * Incident information
+         * =====================================
+         * INCIDENT HEADER
+         * =====================================
          */
         Card(
             modifier =
@@ -185,16 +145,26 @@ fun IncidentDetailsScreen(
 
             shape =
                 RoundedCornerShape(
-                    10.dp
+                    12.dp
                 ),
 
             colors =
                 CardDefaults.cardColors(
                     containerColor =
-                        if (critical) {
-                            Color(0xFFFFEEEE)
+
+                        if (
+                            isCritical
+                        ) {
+
+                            Color(
+                                0xFFFFEEEE
+                            )
+
                         } else {
-                            Color(0xFFFFF5E8)
+
+                            Color(
+                                0xFFFFF7E8
+                            )
                         }
                 )
         ) {
@@ -208,61 +178,68 @@ fun IncidentDetailsScreen(
 
                 Text(
                     text =
-                        if (critical) {
+
+                        if (
+                            isCritical
+                        ) {
+
                             "CRITICAL SOS"
+
                         } else {
+
                             "HELP REQUEST"
                         },
 
                     color =
-                        if (critical) {
-                            Color(0xFFE60000)
+
+                        if (
+                            isCritical
+                        ) {
+
+                            Color(
+                                0xFFD90000
+                            )
+
                         } else {
-                            Color(0xFFDD7600)
+
+                            Color(
+                                0xFFD56D00
+                            )
                         },
 
                     fontSize =
-                        16.sp,
+                        22.sp,
 
                     fontWeight =
                         FontWeight.Bold
                 )
 
+
                 Text(
                     text =
-                        packet.message,
+                        "Priority: ${formatValue(packet.priority)}",
 
                     modifier =
                         Modifier.padding(
-                            top = 8.dp
+                            top = 6.dp
                         ),
 
                     color =
-                        Color.Black,
-
-                    fontSize =
-                        13.sp
-                )
-
-                Text(
-                    text =
-                        "Received: ${formatTime(alert.receivedAt)}",
-
-                    modifier =
-                        Modifier.padding(
-                            top = 10.dp
+                        Color(
+                            0xFF444444
                         ),
 
-                    color =
-                        Color(0xFF666666),
-
                     fontSize =
-                        11.sp
+                        13.sp,
+
+                    fontWeight =
+                        FontWeight.SemiBold
                 )
+
 
                 Text(
                     text =
-                        "Relay hop: ${packet.hopCount}/${packet.ttl}",
+                        "Received ${formatDateTime(alert.receivedAt)}",
 
                     modifier =
                         Modifier.padding(
@@ -270,7 +247,81 @@ fun IncidentDetailsScreen(
                         ),
 
                     color =
-                        Color(0xFF666666),
+                        Color(
+                            0xFF666666
+                        ),
+
+                    fontSize =
+                        12.sp
+                )
+            }
+        }
+
+
+        /*
+         * =====================================
+         * DISASTER CONTEXT
+         * =====================================
+         *
+         * Only meaningful when the SOS contains
+         * locally inferred emergency context.
+         */
+        if (
+            packet.likelyDisaster !=
+            RescuePacket.DISASTER_UNKNOWN
+        ) {
+
+            SectionCard(
+                title =
+                    "Emergency Context"
+            ) {
+
+                DetailRow(
+                    label =
+                        "Likely disaster",
+
+                    value =
+                        formatValue(
+                            packet.likelyDisaster
+                        )
+                )
+
+
+                DetailRow(
+                    label =
+                        "Area severity",
+
+                    value =
+
+                        if (
+                            packet.areaSeverity ==
+                            RescuePacket.SEVERITY_UNKNOWN
+                        ) {
+
+                            "Not available"
+
+                        } else {
+
+                            formatValue(
+                                packet.areaSeverity
+                            )
+                        }
+                )
+
+
+                Text(
+                    text =
+                        "Disaster context is inferred from the active local emergency alert for the sender's location.",
+
+                    modifier =
+                        Modifier.padding(
+                            top = 8.dp
+                        ),
+
+                    color =
+                        Color(
+                            0xFF777777
+                        ),
 
                     fontSize =
                         11.sp
@@ -278,133 +329,158 @@ fun IncidentDetailsScreen(
             }
         }
 
-        /*
-         * Incident map
-         */
-        Text(
-            text = "Location",
-
-            fontSize = 15.sp,
-
-            fontWeight =
-                FontWeight.Bold
-        )
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(230.dp)
-                .clip(
-                    RoundedCornerShape(12.dp)
-                )
-        ) {
-
-            IncidentMap(
-                alert = alert,
-
-                modifier =
-                    Modifier.fillMaxSize(),
-
-                onTouchChanged = {
-                        touching ->
-
-                    mapIsBeingTouched =
-                        touching
-                }
-            )
-        }
-
-        Button(
-            onClick =
-                onOpenFullMap,
-
-            modifier =
-                Modifier.align(
-                    Alignment.End
-                ),
-
-            shape =
-                RoundedCornerShape(
-                    50
-                ),
-
-            colors =
-                ButtonDefaults.buttonColors(
-                    containerColor =
-                        Color(0xFFFFE5E5),
-
-                    contentColor =
-                        Color.Black
-                )
-        ) {
-
-            Text(
-                text =
-                    "Open Full Map",
-
-                fontSize =
-                    12.sp,
-
-                fontWeight =
-                    FontWeight.Bold
-            )
-        }
 
         /*
-         * Witness section
+         * =====================================
+         * REQUEST DETAILS
+         * =====================================
          */
-        Row(
-            modifier =
-                Modifier.fillMaxWidth(),
-
-            verticalAlignment =
-                Alignment.CenterVertically
+        SectionCard(
+            title =
+                "Request Details"
         ) {
 
+            /*
+             * Don't dump the long context string
+             * for critical SOS packets.
+             *
+             * Disaster information is already shown
+             * in structured fields above.
+             */
             Text(
                 text =
-                    "Nearby Witness Reports",
 
-                modifier =
-                    Modifier.weight(
-                        1f
+                    if (
+                        isCritical
+                    ) {
+
+                        "Critical emergency assistance requested."
+
+                    } else {
+
+                        packet.message
+                    },
+
+                color =
+                    Color(
+                        0xFF444444
                     ),
 
                 fontSize =
-                    15.sp,
+                    14.sp,
 
-                fontWeight =
-                    FontWeight.Bold
+                lineHeight =
+                    20.sp
             )
 
-            Button(
-                onClick = {
 
-                    showAddDetailsDialog =
-                        true
-                },
+            HorizontalDivider(
+                modifier =
+                    Modifier.padding(
+                        vertical = 12.dp
+                    )
+            )
+
+
+            DetailRow(
+                label =
+                    "Origin time",
+
+                value =
+                    formatDateTime(
+                        packet.timestamp
+                    )
+            )
+
+
+            DetailRow(
+                label =
+                    "Relay hop",
+
+                value =
+                    "${packet.hopCount}/${packet.ttl}"
+            )
+
+
+            DetailRow(
+                label =
+                    "Incident ID",
+
+                value =
+                    packet.id.take(
+                        8
+                    ).uppercase()
+            )
+        }
+
+
+        /*
+         * =====================================
+         * LOCATION
+         * =====================================
+         */
+        SectionCard(
+            title =
+                "Incident Location"
+        ) {
+
+            DetailRow(
+                label =
+                    "Latitude",
+
+                value =
+                    String.format(
+                        Locale.US,
+                        "%.6f",
+                        packet.latitude
+                    )
+            )
+
+
+            DetailRow(
+                label =
+                    "Longitude",
+
+                value =
+                    String.format(
+                        Locale.US,
+                        "%.6f",
+                        packet.longitude
+                    )
+            )
+
+
+            Button(
+                onClick =
+                    onOpenFullMap,
+
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            top = 10.dp
+                        ),
 
                 shape =
                     RoundedCornerShape(
-                        50
+                        10.dp
                     ),
 
                 colors =
                     ButtonDefaults.buttonColors(
                         containerColor =
-                            Color(0xFFFFE5E5),
+                            Color(
+                                0xFFE53935
+                            ),
 
                         contentColor =
-                            Color.Black
+                            Color.White
                     )
             ) {
 
                 Text(
                     text =
-                        "Add Details",
-
-                    fontSize =
-                        11.sp,
+                        "OPEN FULL MAP",
 
                     fontWeight =
                         FontWeight.Bold
@@ -412,596 +488,331 @@ fun IncidentDetailsScreen(
             }
         }
 
-        if (
-            witnessReports.isEmpty()
+
+        /*
+         * =====================================
+         * WITNESS REPORTS
+         * =====================================
+         */
+        SectionCard(
+            title =
+                "Witness Information"
         ) {
 
-            Card(
-                modifier =
-                    Modifier.fillMaxWidth(),
-
-                colors =
-                    CardDefaults.cardColors(
-                        containerColor =
-                            Color(0xFFF5F5F5)
-                    )
+            if (
+                witnessReports.isEmpty()
             ) {
 
                 Text(
                     text =
-                        "No nearby witness reports yet.",
-
-                    modifier =
-                        Modifier.padding(
-                            16.dp
-                        ),
+                        "No additional witness information has been added.",
 
                     color =
-                        Color(0xFF777777),
+                        Color(
+                            0xFF777777
+                        ),
 
                     fontSize =
-                        12.sp
+                        13.sp
                 )
-            }
 
-        } else {
+            } else {
 
-            witnessReports.forEach {
-                    report ->
+                witnessReports.forEachIndexed {
+                        index,
+                        report ->
 
-                WitnessReportCard(
-                    report =
-                        report
-                )
-            }
-        }
 
-        Spacer(
-            modifier =
-                Modifier.height(
-                    30.dp
-                )
-        )
-    }
+                    if (
+                        index > 0
+                    ) {
 
-    /*
-     * ============================
-     * WITNESS REPORT FORM
-     * ============================
-     */
-    if (
-        showAddDetailsDialog
-    ) {
-
-        AlertDialog(
-            onDismissRequest = {
-
-                showAddDetailsDialog =
-                    false
-            },
-
-            title = {
-
-                Text(
-                    text =
-                        "Add Incident Details",
-
-                    fontWeight =
-                        FontWeight.Bold
-                )
-            },
-
-            text = {
-
-                Column {
-
-                    Text(
-                        text =
-                            "Share what you can see near this incident.",
-
-                        fontSize =
-                            12.sp,
-
-                        color =
-                            Color(0xFF666666)
-                    )
-
-                    IncidentDropdown(
-                        modifier =
-                            Modifier.padding(
-                                top = 14.dp
-                            ),
-
-                        placeholder =
-                            "Type of disaster",
-
-                        selectedValue =
-                            disasterType,
-
-                        options =
-                            listOf(
-                                "Earthquake",
-                                "Flood",
-                                "Fire",
-                                "Landslide",
-                                "Medical",
-                                "Other"
-                            ),
-
-                        onSelected = {
-
-                            disasterType =
-                                it
-                        }
-                    )
-
-                    IncidentDropdown(
-                        modifier =
-                            Modifier.padding(
-                                top = 12.dp
-                            ),
-
-                        placeholder =
-                            "Number of people",
-
-                        selectedValue =
-                            peopleCount,
-
-                        options =
-                            listOf(
-                                "1",
-                                "2 - 5",
-                                "6 - 10",
-                                "11 - 20",
-                                "20+"
-                            ),
-
-                        onSelected = {
-
-                            peopleCount =
-                                it
-                        }
-                    )
-
-                    Text(
-                        text =
-                            "Explain (Optional)",
-
-                        modifier =
-                            Modifier.padding(
-                                top = 14.dp,
-                                bottom = 7.dp
-                            ),
-
-                        fontSize =
-                            12.sp,
-
-                        fontWeight =
-                            FontWeight.SemiBold
-                    )
-
-                    TextField(
-                        value =
-                            explanation,
-
-                        onValueChange = {
-
-                            explanation =
-                                it
-                        },
-
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(120.dp),
-
-                        placeholder = {
-
-                            Text(
-                                text =
-                                    "Example: Building partially collapsed..."
-                            )
-                        },
-
-                        shape =
-                            RoundedCornerShape(
-                                7.dp
-                            ),
-
-                        colors =
-                            TextFieldDefaults.colors(
-                                focusedContainerColor =
-                                    Color(0xFFE4E4E4),
-
-                                unfocusedContainerColor =
-                                    Color(0xFFE4E4E4),
-
-                                focusedIndicatorColor =
-                                    Color.Transparent,
-
-                                unfocusedIndicatorColor =
-                                    Color.Transparent
-                            )
-                    )
-                }
-            },
-
-            confirmButton = {
-
-                TextButton(
-                    enabled =
-                        disasterType
-                            .isNotBlank() &&
-                                peopleCount
-                                    .isNotBlank(),
-
-                    onClick = {
-
-                        onAddDetails(
-                            disasterType,
-                            peopleCount,
-                            explanation.trim()
+                        HorizontalDivider(
+                            modifier =
+                                Modifier.padding(
+                                    vertical = 10.dp
+                                )
                         )
-
-                        /*
-                         * Reset form.
-                         */
-                        disasterType =
-                            ""
-
-                        peopleCount =
-                            ""
-
-                        explanation =
-                            ""
-
-                        showAddDetailsDialog =
-                            false
                     }
-                ) {
 
-                    Text(
-                        text =
-                            "Submit Details",
 
-                        color =
-                            Color(0xFFE60000),
+                    if (
+                        report.disasterType
+                            .isNotBlank()
+                    ) {
 
-                        fontWeight =
-                            FontWeight.Bold
-                    )
-                }
-            },
+                        DetailRow(
+                            label =
+                                "Disaster",
 
-            dismissButton = {
-
-                TextButton(
-                    onClick = {
-
-                        showAddDetailsDialog =
-                            false
+                            value =
+                                report.disasterType
+                        )
                     }
-                ) {
 
-                    Text(
-                        text =
-                            "Cancel",
 
-                        color =
-                            Color.Black
-                    )
-                }
-            }
-        )
-    }
-}
+                    if (
+                        report.peopleCount
+                            .isNotBlank()
+                    ) {
 
-@Composable
-private fun IncidentDropdown(
-    placeholder: String,
-    selectedValue: String,
-    options: List<String>,
-    onSelected: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
+                        DetailRow(
+                            label =
+                                "People",
 
-    var expanded by remember {
-        mutableStateOf(false)
-    }
+                            value =
+                                report.peopleCount
+                        )
+                    }
 
-    Box(
-        modifier =
-            modifier.fillMaxWidth()
-    ) {
 
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(46.dp)
-                .clickable {
-
-                    expanded =
-                        true
-                },
-
-            shape =
-                RoundedCornerShape(
-                    7.dp
-                ),
-
-            color =
-                Color(0xFFE4E4E4)
-        ) {
-
-            Row(
-                modifier =
-                    Modifier.padding(
-                        horizontal = 13.dp
-                    ),
-
-                verticalAlignment =
-                    Alignment.CenterVertically
-            ) {
-
-                Text(
-                    text =
-                        if (
-                            selectedValue
-                                .isBlank()
-                        ) {
-                            placeholder
-                        } else {
-                            selectedValue
-                        },
-
-                    modifier =
-                        Modifier.weight(
-                            1f
-                        ),
-
-                    fontSize =
-                        12.sp,
-
-                    color =
-                        if (
-                            selectedValue
-                                .isBlank()
-                        ) {
-                            Color(0xFF777777)
-                        } else {
-                            Color.Black
-                        }
-                )
-
-                Text(
-                    text = "▼",
-                    fontSize = 9.sp
-                )
-            }
-        }
-
-        DropdownMenu(
-            expanded =
-                expanded,
-
-            onDismissRequest = {
-
-                expanded =
-                    false
-            }
-        ) {
-
-            options.forEach {
-                    option ->
-
-                DropdownMenuItem(
-                    text = {
+                    if (
+                        report.message
+                            .isNotBlank()
+                    ) {
 
                         Text(
                             text =
-                                option
+                                report.message,
+
+                            modifier =
+                                Modifier.padding(
+                                    top = 5.dp
+                                ),
+
+                            color =
+                                Color(
+                                    0xFF444444
+                                ),
+
+                            fontSize =
+                                13.sp
                         )
-                    },
-
-                    onClick = {
-
-                        onSelected(
-                            option
-                        )
-
-                        expanded =
-                            false
                     }
+
+
+                    Text(
+                        text =
+                            formatDateTime(
+                                report.createdAt
+                            ),
+
+                        modifier =
+                            Modifier.padding(
+                                top = 5.dp
+                            ),
+
+                        color =
+                            Color(
+                                0xFF888888
+                            ),
+
+                        fontSize =
+                            11.sp
+                    )
+                }
+            }
+        }
+
+
+        /*
+         * =====================================
+         * ADD WITNESS INFORMATION
+         * =====================================
+         */
+        SectionCard(
+            title =
+                "Add Information"
+        ) {
+
+            Text(
+                text =
+                    "Add details you observed about this incident.",
+
+                color =
+                    Color(
+                        0xFF666666
+                    ),
+
+                fontSize =
+                    13.sp
+            )
+
+
+            OutlinedTextField(
+                value =
+                    disasterType,
+
+                onValueChange = {
+
+                    disasterType =
+                        it
+                },
+
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            top = 10.dp
+                        ),
+
+                label = {
+
+                    Text(
+                        "Disaster type"
+                    )
+                },
+
+                singleLine =
+                    true
+            )
+
+
+            OutlinedTextField(
+                value =
+                    peopleCount,
+
+                onValueChange = {
+
+                    peopleCount =
+                        it
+                },
+
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            top = 8.dp
+                        ),
+
+                label = {
+
+                    Text(
+                        "People affected"
+                    )
+                },
+
+                singleLine =
+                    true
+            )
+
+
+            OutlinedTextField(
+                value =
+                    explanation,
+
+                onValueChange = {
+
+                    explanation =
+                        it
+                },
+
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            top = 8.dp
+                        ),
+
+                label = {
+
+                    Text(
+                        "Additional details"
+                    )
+                },
+
+                minLines =
+                    3
+            )
+
+
+            Button(
+                onClick = {
+
+                    onAddDetails(
+                        disasterType.trim(),
+                        peopleCount.trim(),
+                        explanation.trim()
+                    )
+
+
+                    /*
+                     * Clear form after adding.
+                     */
+                    disasterType =
+                        ""
+
+                    peopleCount =
+                        ""
+
+                    explanation =
+                        ""
+                },
+
+                enabled =
+
+                    disasterType
+                        .isNotBlank() ||
+
+                            peopleCount
+                                .isNotBlank() ||
+
+                            explanation
+                                .isNotBlank(),
+
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            top = 12.dp
+                        ),
+
+                shape =
+                    RoundedCornerShape(
+                        10.dp
+                    )
+            ) {
+
+                Text(
+                    text =
+                        "ADD DETAILS",
+
+                    fontWeight =
+                        FontWeight.Bold
                 )
             }
+        }
+
+
+        /*
+         * Back button at bottom as well,
+         * useful on long incident pages.
+         */
+        OutlinedButton(
+            onClick =
+                onBackClick,
+
+            modifier =
+                Modifier.fillMaxWidth()
+        ) {
+
+            Text(
+                text =
+                    "BACK TO NOTIFICATIONS"
+            )
         }
     }
 }
 
-@Composable
-private fun IncidentMap(
-    alert: ReceivedAlert,
-    modifier: Modifier = Modifier,
-    onTouchChanged: (Boolean) -> Unit = {}
-) {
-
-    val packet =
-        alert.packet
-
-    AndroidView(
-        modifier =
-            modifier,
-
-        factory = {
-                context ->
-
-            val point =
-                GeoPoint(
-                    packet.latitude,
-                    packet.longitude
-                )
-
-            MapView(
-                context
-            ).apply {
-
-                setTileSource(
-                    TileSourceFactory.MAPNIK
-                )
-
-                setUseDataConnection(
-                    true
-                )
-
-                setMultiTouchControls(
-                    true
-                )
-
-                controller.setZoom(
-                    16.5
-                )
-
-                controller.setCenter(
-                    point
-                )
-
-                /*
-                 * IMPORTANT:
-                 *
-                 * When the user touches this map,
-                 * stop the outer Incident Details
-                 * screen from scrolling.
-                 */
-                setOnTouchListener {
-                        view,
-                        event ->
-
-                    when (
-                        event.actionMasked
-                    ) {
-
-                        MotionEvent.ACTION_DOWN -> {
-
-                            view.parent
-                                ?.requestDisallowInterceptTouchEvent(
-                                    true
-                                )
-
-                            onTouchChanged(
-                                true
-                            )
-                        }
-
-                        MotionEvent.ACTION_UP,
-                        MotionEvent.ACTION_CANCEL -> {
-
-                            view.parent
-                                ?.requestDisallowInterceptTouchEvent(
-                                    false
-                                )
-
-                            onTouchChanged(
-                                false
-                            )
-                        }
-                    }
-
-                    /*
-                     * false means the MapView itself
-                     * still receives the touch event.
-                     *
-                     * So zoom/pan continues working.
-                     */
-                    false
-                }
-
-                val marker =
-                    Marker(
-                        this
-                    )
-
-                marker.position =
-                    point
-
-                val drawable =
-                    ContextCompat.getDrawable(
-                        context,
-
-                        if (
-                            packet.priority ==
-                            "CRITICAL"
-                        ) {
-                            R.drawable.sos_marker
-                        } else {
-                            R.drawable.help_marker
-                        }
-                    )
-
-                if (
-                    drawable != null
-                ) {
-
-                    marker.icon =
-                        drawable
-
-                } else {
-
-                    marker.setTextIcon(
-                        "SOS"
-                    )
-                }
-
-                marker.setAnchor(
-                    Marker.ANCHOR_CENTER,
-                    Marker.ANCHOR_CENTER
-                )
-
-                marker.title =
-                    if (
-                        packet.priority ==
-                        "CRITICAL"
-                    ) {
-                        "Critical SOS"
-                    } else {
-                        "Help Request"
-                    }
-
-                marker.snippet =
-                    packet.message
-
-                overlays.add(
-                    marker
-                )
-
-                onResume()
-            }
-        },
-
-        onRelease = {
-                mapView ->
-
-            /*
-             * Re-enable page scrolling
-             * in case the map disappears while
-             * being touched.
-             */
-            onTouchChanged(
-                false
-            )
-
-            mapView.setOnTouchListener(
-                null
-            )
-
-            mapView.onPause()
-
-            mapView.onDetach()
-        }
-    )
-}
 
 @Composable
-private fun WitnessReportCard(
-    report: WitnessReport
+private fun SectionCard(
+
+    title: String,
+
+    content:
+    @Composable () -> Unit
+
 ) {
 
     Card(
@@ -1010,104 +821,175 @@ private fun WitnessReportCard(
 
         shape =
             RoundedCornerShape(
-                8.dp
+                12.dp
             ),
 
         colors =
             CardDefaults.cardColors(
                 containerColor =
-                    Color(0xFFF4F4F4)
+                    Color.White
+            ),
+
+        elevation =
+            CardDefaults.cardElevation(
+                defaultElevation =
+                    2.dp
             )
     ) {
 
         Column(
             modifier =
                 Modifier.padding(
-                    14.dp
+                    16.dp
                 )
         ) {
 
             Text(
                 text =
-                    report.disasterType,
+                    title,
+
+                color =
+                    Color(
+                        0xFF222222
+                    ),
+
+                fontSize =
+                    16.sp,
 
                 fontWeight =
-                    FontWeight.Bold,
-
-                fontSize =
-                    13.sp
+                    FontWeight.Bold
             )
 
-            Text(
-                text =
-                    "People observed: ${report.peopleCount}",
 
+            Column(
                 modifier =
                     Modifier.padding(
-                        top = 4.dp
-                    ),
-
-                color =
-                    Color(0xFF555555),
-
-                fontSize =
-                    11.sp
-            )
-
-            if (
-                report.message
-                    .isNotBlank()
+                        top = 10.dp
+                    )
             ) {
 
-                Text(
-                    text =
-                        report.message,
-
-                    modifier =
-                        Modifier.padding(
-                            top = 7.dp
-                        ),
-
-                    color =
-                        Color.Black,
-
-                    fontSize =
-                        12.sp
-                )
+                content()
             }
-
-            Text(
-                text =
-                    formatTime(
-                        report.createdAt
-                    ),
-
-                modifier =
-                    Modifier.padding(
-                        top = 7.dp
-                    ),
-
-                color =
-                    Color(0xFF777777),
-
-                fontSize =
-                    10.sp
-            )
         }
     }
 }
 
-private fun formatTime(
+
+@Composable
+private fun DetailRow(
+
+    label: String,
+
+    value: String
+
+) {
+
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(
+                    vertical = 3.dp
+                ),
+
+        horizontalArrangement =
+            Arrangement.SpaceBetween
+    ) {
+
+        Text(
+            text =
+                label,
+
+            modifier =
+                Modifier.weight(
+                    1f
+                ),
+
+            color =
+                Color(
+                    0xFF777777
+                ),
+
+            fontSize =
+                12.sp
+        )
+
+
+        Text(
+            text =
+                value,
+
+            modifier =
+                Modifier.weight(
+                    1.4f
+                ),
+
+            color =
+                Color(
+                    0xFF333333
+                ),
+
+            fontSize =
+                12.sp,
+
+            fontWeight =
+                FontWeight.SemiBold
+        )
+    }
+}
+
+
+private fun formatValue(
+    value: String
+): String {
+
+    return value
+        .lowercase()
+        .replace(
+            "_",
+            " "
+        )
+        .split(
+            " "
+        )
+        .joinToString(
+            " "
+        ) {
+                word ->
+
+            word.replaceFirstChar {
+
+                if (
+                    it.isLowerCase()
+                ) {
+
+                    it.titlecase(
+                        Locale.getDefault()
+                    )
+
+                } else {
+
+                    it.toString()
+                }
+            }
+        }
+}
+
+
+private fun formatDateTime(
     timestamp: Long
 ): String {
 
     val formatter =
         SimpleDateFormat(
-            "hh:mm a",
+            "dd MMM yyyy, hh:mm a",
             Locale.getDefault()
         )
 
+
     return formatter.format(
-        Date(timestamp)
+        Date(
+            timestamp
+        )
     )
 }

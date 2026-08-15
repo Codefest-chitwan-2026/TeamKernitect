@@ -18,27 +18,84 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kernitect.saharaandroid.data.local.entity.PublicAlertEntity
 
 @Composable
 fun EmergencyCard(
-    type: String = "—",
-    location: String = "—",
+    alert: PublicAlertEntity? = null,
     onMapClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+
     Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = Color(0xFFFF5A5F)
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(
-                horizontal = 16.dp,
-                vertical = 14.dp
+        modifier =
+            modifier.fillMaxWidth(),
+
+        shape =
+            RoundedCornerShape(8.dp),
+
+        colors =
+            CardDefaults.cardColors(
+                containerColor =
+                    Color(0xFFFF5A5F)
             )
+    ) {
+
+        Column(
+            modifier =
+                Modifier.padding(
+                    horizontal = 16.dp,
+                    vertical = 14.dp
+                )
         ) {
+
+            /*
+             * ============================
+             * NO LOCAL ALERT
+             * ============================
+             */
+            if (alert == null) {
+
+                Text(
+                    text = "Emergency Alert",
+                    color = Color.White,
+                    fontSize = 25.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Text(
+                    text = "No active local emergency alert",
+                    modifier =
+                        Modifier.padding(
+                            top = 6.dp
+                        ),
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium
+                )
+
+                Text(
+                    text = "Your location is not currently inside a stored emergency zone.",
+                    modifier =
+                        Modifier.padding(
+                            top = 4.dp
+                        ),
+                    color =
+                        Color.White.copy(
+                            alpha = 0.9f
+                        ),
+                    fontSize = 12.sp
+                )
+
+                return@Column
+            }
+
+
+            /*
+             * ============================
+             * ACTIVE LOCAL ALERT
+             * ============================
+             */
 
             Text(
                 text = "Emergency Alert",
@@ -47,41 +104,148 @@ fun EmergencyCard(
                 fontWeight = FontWeight.Bold
             )
 
+
+            /*
+             * Hackathon demo marker.
+             */
+
+
             Text(
-                text = "Type: $type",
-                modifier = Modifier.padding(top = 5.dp),
+                text =
+                    "Type: ${
+                        alert.disasterType
+                            .replace(
+                                "_",
+                                " "
+                            )
+                    }",
+
+                modifier =
+                    Modifier.padding(
+                        top = 5.dp
+                    ),
+
                 color = Color.White,
+
                 fontSize = 15.sp,
-                fontWeight = FontWeight.Medium
+
+                fontWeight =
+                    FontWeight.Bold
             )
 
+
+            Text(
+                text =
+                    "Severity: ${
+                        alert.severity
+                            .replace(
+                                "_",
+                                " "
+                            )
+                    }",
+
+                modifier =
+                    Modifier.padding(
+                        top = 2.dp
+                    ),
+
+                color = Color.White,
+
+                fontSize = 13.sp,
+
+                fontWeight =
+                    FontWeight.Medium
+            )
+
+
+            Text(
+                text =
+                    alert.message,
+
+                modifier =
+                    Modifier.padding(
+                        top = 7.dp
+                    ),
+
+                color =
+                    Color.White.copy(
+                        alpha = 0.95f
+                    ),
+
+                fontSize = 13.sp
+            )
+
+
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            top = 9.dp
+                        ),
+
+                verticalAlignment =
+                    Alignment.CenterVertically,
+
+                horizontalArrangement =
+                    Arrangement.SpaceBetween
             ) {
 
-                Text(
-                    text = "Location: $location",
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
-                )
+                Column(
+                    modifier =
+                        Modifier.weight(1f)
+                ) {
+
+                    Text(
+                        text =
+                            alert.municipality,
+
+                        color = Color.White,
+
+                        fontSize = 12.sp,
+
+                        fontWeight =
+                            FontWeight.Bold
+                    )
+
+
+                    Text(
+                        text =
+                            "${alert.district}, ${alert.province}",
+
+                        color =
+                            Color.White.copy(
+                                alpha = 0.9f
+                            ),
+
+                        fontSize = 11.sp
+                    )
+                }
+
 
                 Button(
-                    onClick = onMapClick,
-                    shape = RoundedCornerShape(50),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFF3BEBE),
-                        contentColor = Color.Black
-                    ),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        horizontal = 15.dp,
-                        vertical = 3.dp
-                    )
+                    onClick =
+                        onMapClick,
+
+                    shape =
+                        RoundedCornerShape(50),
+
+                    colors =
+                        ButtonDefaults.buttonColors(
+                            containerColor =
+                                Color(0xFFF3BEBE),
+
+                            contentColor =
+                                Color.Black
+                        ),
+
+                    contentPadding =
+                        androidx.compose.foundation.layout.PaddingValues(
+                            horizontal = 15.dp,
+                            vertical = 3.dp
+                        )
                 ) {
+
                     Text(
                         text = "MAP",
                         fontSize = 13.sp,
