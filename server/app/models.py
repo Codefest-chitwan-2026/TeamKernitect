@@ -62,4 +62,27 @@ class SosPacket(BaseModel):
     )
 
     priority: SosPriority = SosPriority.CRITICAL
+
+
+class ResponderStatus(str, Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+class ResponderRegistrationRequest(BaseModel):
+    deviceId: str = Field(min_length=8, max_length=100)
+    operatorName: str = Field(min_length=1, max_length=100)
+    organization: str = Field(min_length=1, max_length=150)
+    phone: str = Field(min_length=1, max_length=40)
+    email: str | None = Field(default=None, max_length=150)
+    district: str = Field(min_length=1, max_length=100)
+
+
+class ResponderApprovalRequest(BaseModel):
+    teamId: str = Field(min_length=1, max_length=100)
+
+
+class ResponderRejectionRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=300)
     
