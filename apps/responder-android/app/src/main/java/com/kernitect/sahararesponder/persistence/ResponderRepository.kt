@@ -14,7 +14,7 @@ class ResponderRepository(private val database: ResponderDatabase) {
     private val dao = database.dao()
 
     suspend fun restore() = RestoredOperationalState(
-        incidents = dao.incidents().map { ResponderIncident(it.incidentId, it.priority, it.message, it.latitude, it.longitude, it.sosTimestamp, it.hopCount, it.lifecycleStatus, it.receivedAt) },
+        incidents = dao.incidents().map { ResponderIncident(it.incidentId, it.priority, it.message, it.latitude, it.longitude, it.sosTimestamp, it.hopCount, it.ttl, it.lifecycleStatus, it.receivedAt) },
         claims = dao.claims().map { IncidentClaim(it.packetId, it.incidentId, it.responderId, it.teamId, it.teamName, it.callsign, it.deviceId, it.district, it.latitude, it.longitude, it.timestamp) },
         events = dao.events().mapNotNull { entity -> RescueLifecycle.parse(entity.status)?.let {
             entity.incidentId to RescueLifecycleEvent(it, entity.timestamp, entity.teamId, entity.teamName, entity.callsign, entity.sourcePacketId)
@@ -24,6 +24,10 @@ class ResponderRepository(private val database: ResponderDatabase) {
     )
 
     suspend fun saveIncident(incident: ResponderIncident) = dao.upsertIncident(incident.entity())
+    suspend fun persistIncomingSos(incident: ResponderIncident) = database.withTransaction {
+        dao.upsertIncident(incident.entity())
+        dao.upsertProcessed(ProcessedPacketEntity(incident.id, incident.id, RescuePacket.TYPE_SOS, System.currentTimeMillis()))
+    }
     suspend fun saveClaim(claim: IncidentClaim) = dao.upsertClaim(claim.entity())
     suspend fun saveEvent(incidentId: String, event: RescueLifecycleEvent) = dao.upsertEvent(event.entity(incidentId))
     suspend fun saveProcessed(packetId: String, incidentId: String, type: String) =
@@ -36,9 +40,10 @@ class ResponderRepository(private val database: ResponderDatabase) {
 
     suspend fun saveOutgoing(packet: MeshOutgoingPacket, state: AckSendState, failure: String? = null, attempted: Boolean = false) {
         val old = dao.outgoing().firstOrNull { it.packetId == packet.id }
-        dao.upsertOutgoing(OutgoingPacketEntity(packet.id, packet.incidentId, packet.type, packet.toJson(),
+        val updated = OutgoingPacketEntity(packet.id, packet.incidentId, packet.type, packet.toJson(),
             old?.createdAt ?: System.currentTimeMillis(), state.name, (old?.attemptCount ?: 0) + if (attempted) 1 else 0,
-            if (attempted) System.currentTimeMillis() else old?.lastAttemptAt, failure))
+            if (attempted) System.currentTimeMillis() else old?.lastAttemptAt, failure)
+        dao.upsertOutgoing(preserveCloudSyncState(old, updated))
     }
 
     suspend fun persistAcceptance(incident: ResponderIncident, claim: IncidentClaim, event: RescueLifecycleEvent,
@@ -55,7 +60,7 @@ class ResponderRepository(private val database: ResponderDatabase) {
         dao.upsertOutgoing(OutgoingPacketEntity(packet.id, incident.id, packet.type, packet.toJson(), packet.timestamp, AckSendState.IDLE.name))
     }
 
-    private fun ResponderIncident.entity() = IncidentEntity(id, priority, message, latitude, longitude, timestamp, receivedAt, hopCount, 5, status)
+    private fun ResponderIncident.entity() = IncidentEntity(id, priority, message, latitude, longitude, timestamp, receivedAt, hopCount, ttl, status)
     private fun IncidentClaim.entity() = ClaimEntity(packetId, incidentId, responderId, teamId, teamName, callsign, deviceId, district, latitude, longitude, timestamp)
     private fun RescueLifecycleEvent.entity(incidentId: String) = LifecycleEventEntity(incidentId, status.name, timestamp, teamId, teamName, callsign, sourcePacketId)
 
@@ -65,3 +70,10 @@ private val transientSendStates = setOf(AckSendState.SEARCHING.name, AckSendStat
 
 fun normalizeRecoveredOutgoing(entity: OutgoingPacketEntity): OutgoingPacketEntity =
     if (entity.sendState in transientSendStates) entity.copy(sendState = AckSendState.FAILED.name, failureReason = "Send interrupted by app restart") else entity
+
+fun preserveCloudSyncState(old: OutgoingPacketEntity?, updated: OutgoingPacketEntity): OutgoingPacketEntity =
+    if (old == null) updated else updated.copy(
+        backendSyncState = old.backendSyncState,
+        backendFailureReason = old.backendFailureReason,
+        backendLastAttemptAt = old.backendLastAttemptAt,
+    )

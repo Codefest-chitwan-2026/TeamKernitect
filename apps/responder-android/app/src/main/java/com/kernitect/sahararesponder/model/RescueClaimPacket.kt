@@ -84,3 +84,17 @@ fun ownershipOf(claims: List<IncidentClaim>, localTeamId: String): IncidentOwner
     val other = teams.any { it != localTeamId }
     return when { mine && other -> IncidentOwnership.CONFLICT; mine -> IncidentOwnership.CLAIMED_BY_ME; other -> IncidentOwnership.CLAIMED_BY_OTHER; else -> IncidentOwnership.UNCLAIMED }
 }
+
+fun canAcceptIncident(status: String, ownership: IncidentOwnership): Boolean =
+    status == RescueLifecycle.NEW.name && ownership == IncidentOwnership.UNCLAIMED
+
+data class ClaimReceiptPlan(val shouldProcess: Boolean, val relayPacket: RescueClaimPacket?)
+
+fun planClaimReceipt(packet: RescueClaimPacket, alreadySeen: Boolean): ClaimReceiptPlan = when {
+    alreadySeen -> ClaimReceiptPlan(shouldProcess = false, relayPacket = null)
+    packet.canRelay() -> ClaimReceiptPlan(shouldProcess = true, relayPacket = packet.nextHop())
+    else -> ClaimReceiptPlan(shouldProcess = true, relayPacket = null)
+}
+
+fun appendClaimIfNew(existing: List<IncidentClaim>, claim: IncidentClaim): List<IncidentClaim> =
+    if (existing.any { it.packetId == claim.packetId }) existing else existing + claim

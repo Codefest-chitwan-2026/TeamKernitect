@@ -25,6 +25,10 @@ import com.kernitect.sahararesponder.mesh.ClaimRecord
 import com.kernitect.sahararesponder.model.IncidentClaim
 import com.kernitect.sahararesponder.model.IncidentOwnership
 import com.kernitect.sahararesponder.model.ownershipOf
+import com.kernitect.sahararesponder.model.canAcceptIncident
+import com.kernitect.sahararesponder.model.SosHandoffRecord
+import com.kernitect.sahararesponder.model.SosHandoffState
+import com.kernitect.sahararesponder.model.handoffLocksAccept
 import com.kernitect.sahararesponder.model.RescueLifecycle
 import com.kernitect.sahararesponder.model.RescueStatusEvent
 import com.kernitect.sahararesponder.model.latestStatusByTeam
@@ -46,6 +50,9 @@ fun IncidentDetailsScreen(
     statusRecord: StatusRecord?,
     lifecycleEvents: List<RescueLifecycleEvent>,
     onAcceptRescue: () -> Unit,
+    handoffRecord: SosHandoffRecord?,
+    acceptInProgress: Boolean,
+    onPassRescue: () -> Unit,
     onRetryAck: () -> Unit,
     onRetryClaim: () -> Unit,
     onAdvanceLifecycle: (RescueLifecycle) -> Unit,
@@ -176,8 +183,8 @@ fun IncidentDetailsScreen(
                     onClick = {
                         if (lifecycle == RescueLifecycle.NEW) showAcceptDialog = true else pendingTransition = lifecycle.next()
                     },
-                    enabled = (lifecycle == RescueLifecycle.NEW && ownership == IncidentOwnership.UNCLAIMED) ||
-                        (lifecycle.next() != null && canControl),
+                    enabled = !acceptInProgress && ((canAcceptIncident(incident.status, ownership) && !handoffLocksAccept(handoffRecord)) ||
+                        (lifecycle.next() != null && canControl)),
                     modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
                 ) {
                     Text(when {
@@ -194,6 +201,25 @@ fun IncidentDetailsScreen(
                         ownership == IncidentOwnership.CONFLICT -> "CLAIM CONFLICT"
                         else -> "ACCEPT RESCUE"
                     })
+                }
+                if (lifecycle == RescueLifecycle.NEW && ownership == IncidentOwnership.UNCLAIMED) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onPassRescue,
+                        enabled = !acceptInProgress && handoffRecord?.state !in setOf(SosHandoffState.PASSING, SosHandoffState.PASSED, SosHandoffState.TTL_EXHAUSTED),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                    ) {
+                        Text(when (handoffRecord?.state) {
+                            SosHandoffState.PASSING -> "PASSING…"
+                            SosHandoffState.PASSED -> "PASSED TO NEXT TEAM"
+                            SosHandoffState.FAILED -> "RETRY PASS"
+                            SosHandoffState.TTL_EXHAUSTED -> "NO FURTHER MESH HOPS"
+                            null -> "BUSY / PASS TO NEXT TEAM"
+                        })
+                    }
+                    handoffRecord?.failureReason?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    if (handoffRecord?.state == SosHandoffState.PASSED) Text("SOS handed off to the next reachable rescue team.", color = MaterialTheme.colorScheme.primary)
+                    if (handoffRecord?.state == SosHandoffState.TTL_EXHAUSTED) Text("No further mesh hops are available. You may still accept this rescue.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Text(
                     if (incident.status == "NEW") "Confirmation required" else "Local responder assignment active",

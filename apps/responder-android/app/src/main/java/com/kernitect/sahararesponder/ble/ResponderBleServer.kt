@@ -15,7 +15,7 @@ import android.util.Log
 
 class ResponderBleServer(
     private val context: Context,
-    private val onMessageReceived: (String) -> Unit,
+    private val onMessageReceived: (raw: String, sourceAddress: String?) -> Unit,
     private val onStatusChanged: (String) -> Unit,
     private val onReady: () -> Unit,
 ) {
@@ -56,7 +56,7 @@ class ResponderBleServer(
 
             val raw = value.toString(Charsets.UTF_8)
             Log.d(TAG, "Raw packet received (${value.size} bytes)")
-            onMessageReceived(raw)
+            onMessageReceived(raw, safeAddress(device))
             if (responseNeeded) respond(device, requestId, BluetoothGatt.GATT_SUCCESS)
         }
 
@@ -129,6 +129,9 @@ class ResponderBleServer(
             Log.w(TAG, "Could not send GATT response: permission missing")
         }
     }
+
+    @SuppressLint("MissingPermission")
+    private fun safeAddress(device: BluetoothDevice): String? = try { device.address } catch (_: SecurityException) { null }
 
     @SuppressLint("MissingPermission")
     fun stop() {

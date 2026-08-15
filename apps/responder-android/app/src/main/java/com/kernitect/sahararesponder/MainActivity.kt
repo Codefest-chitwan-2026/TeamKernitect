@@ -29,6 +29,11 @@ import kotlinx.coroutines.launch
 import com.kernitect.sahararesponder.ble.ResponderBleAdvertiser
 import com.kernitect.sahararesponder.ble.ResponderBleServer
 import com.kernitect.sahararesponder.model.RescuePacket
+import com.kernitect.sahararesponder.model.planSosReceipt
+import com.kernitect.sahararesponder.model.SosHandoffRecord
+import com.kernitect.sahararesponder.model.SosHandoffState
+import com.kernitect.sahararesponder.model.prepareSosHandoff
+import com.kernitect.sahararesponder.model.handoffLocksAccept
 import com.kernitect.sahararesponder.model.ResponderIncident
 import com.kernitect.sahararesponder.model.RescueAckPacket
 import com.kernitect.sahararesponder.model.ResponderTeamProfile
@@ -38,6 +43,9 @@ import com.kernitect.sahararesponder.model.RescueClaimPacket
 import com.kernitect.sahararesponder.model.IncidentClaim
 import com.kernitect.sahararesponder.model.IncidentOwnership
 import com.kernitect.sahararesponder.model.ownershipOf
+import com.kernitect.sahararesponder.model.canAcceptIncident
+import com.kernitect.sahararesponder.model.planClaimReceipt
+import com.kernitect.sahararesponder.model.appendClaimIfNew
 import com.kernitect.sahararesponder.model.RescueLifecycle
 import com.kernitect.sahararesponder.model.RescueStatusEvent
 import com.kernitect.sahararesponder.model.RescueStatusPacket
@@ -80,6 +88,9 @@ class MainActivity : ComponentActivity() {
     private val statusesByIncident = mutableStateMapOf<String, List<RescueStatusEvent>>()
     private val seenStatusIds = mutableSetOf<String>()
     private val lifecycleEventsByIncident = mutableStateMapOf<String, List<RescueLifecycleEvent>>()
+    private val handoffRecords = mutableStateMapOf<String, SosHandoffRecord>()
+    private val sosSourceAddresses = mutableMapOf<String, String?>()
+    private val acceptingIncidents = mutableStateMapOf<String, Boolean>()
     private var receiverStarted = false
     private var activityStarted = false
     private var responderLocation by mutableStateOf<ResponderLocation?>(null)
@@ -154,6 +165,19 @@ class MainActivity : ComponentActivity() {
                     statusRecords[packet.id] = existing.copy(state = state, failureReason = failureReason)
                     persistOutgoing(packet, state, failureReason)
                     Log.i(TAG, if (state == AckSendState.SENT_TO_MESH) "Status written to mesh neighbor: ${packet.id}" else "Status ${state.name}: ${packet.id}")
+                } else if (packet.type == RescuePacket.TYPE_SOS) {
+                    val existing = handoffRecords[packet.incidentId]
+                    when (state) {
+                        AckSendState.SENT_TO_MESH -> {
+                            if (existing?.relayPacket?.id == packet.id) handoffRecords[packet.incidentId] = existing.copy(state = SosHandoffState.PASSED, failureReason = null)
+                            Log.i(TAG, "Passed ${packet.id} to responder peer")
+                        }
+                        AckSendState.FAILED -> {
+                            if (existing?.relayPacket?.id == packet.id) handoffRecords[packet.incidentId] = existing.copy(state = SosHandoffState.FAILED, failureReason = failureReason)
+                            Log.w(TAG, "Pass failed ${packet.id}: ${failureReason.orEmpty()}")
+                        }
+                        else -> Unit
+                    }
                 } else {
                     val existing = ackRecords[packet.incidentId] ?: return@runOnUiThread
                     ackRecords[packet.incidentId] = existing.copy(state = state, failureReason = failureReason)
@@ -243,6 +267,9 @@ class MainActivity : ComponentActivity() {
                                 val accepted = acceptIncident(selected)
                                 selectedIncident = accepted
                             },
+                            handoffRecord = handoffRecords[selected.id],
+                            acceptInProgress = acceptingIncidents[selected.id] == true,
+                            onPassRescue = { passIncident(selected) },
                             onRetryAck = { retryAck(selected.id) },
                             onRetryClaim = { retryClaim(selected.id) },
                             onAdvanceLifecycle = { next -> advanceLifecycle(selected, next) },
@@ -443,14 +470,14 @@ class MainActivity : ComponentActivity() {
         bleServer.start()
     }
 
-    private fun handlePacket(raw: String) {
+    private fun handlePacket(raw: String, sourceAddress: String?) {
         val type = runCatching { JSONObject(raw).optString("type") }.getOrNull()
         if (type == RescueClaimPacket.TYPE) {
-            handleClaim(raw)
+            handleClaim(raw, sourceAddress)
             return
         }
         if (type == RescueStatusPacket.TYPE) {
-            handleStatus(raw)
+            handleStatus(raw, sourceAddress)
             return
         }
         if (type != RescuePacket.TYPE_SOS) {
@@ -467,35 +494,52 @@ class MainActivity : ComponentActivity() {
             return
         }
         runOnUiThread {
-            if (!seenPacketIds.add(packet.id)) {
-                Log.d(TAG, "Duplicate packet ignored: ${packet.id}")
+            val plan = planSosReceipt(packet.id in seenPacketIds)
+            if (!plan.shouldProcess) {
+                Log.i(TAG, "Duplicate SOS ignored ${packet.id}")
                 return@runOnUiThread
             }
-            Log.i(TAG, "SOS parsed: ${packet.id}, priority=${packet.priority}")
+            seenPacketIds.add(packet.id)
+            sosSourceAddresses[packet.id] = sourceAddress
+            Log.i(TAG, "Received new SOS ${packet.id}")
             val received = ResponderIncident.fromPacket(packet)
-            incidents.add(0, received)
-            latestStatusByTeam(statusesByIncident[packet.id].orEmpty()).values
-                .sortedBy { RescueLifecycle.parse(it.status)?.rank }
-                .forEach { applyDisplayedStatus(packet.id, it.teamId, it.status) }
-            val persistedIncident = incidents.first { it.id == packet.id }
-            lifecycleScope.launch { runCatching { repository.saveIncident(persistedIncident) }.onFailure { persistenceFailure("incident ${packet.id}", it) } }
-            meshStatus = "SOS received"
+            lifecycleScope.launch {
+                runCatching { repository.persistIncomingSos(received) }.onSuccess {
+                    runOnUiThread {
+                        incidents.add(0, received)
+                        latestStatusByTeam(statusesByIncident[packet.id].orEmpty()).values
+                            .sortedBy { RescueLifecycle.parse(it.status)?.rank }
+                            .forEach { applyDisplayedStatus(packet.id, it.teamId, it.status) }
+                        meshStatus = "SOS received"
+                        Log.i(TAG, "Waiting for responder decision ${packet.id}")
+                        if (hasOutgoingScanPermission()) meshSender.warmResponderDiscovery(sourceAddress)
+                    }
+                }.onFailure {
+                    runOnUiThread { seenPacketIds.remove(packet.id) }
+                    persistenceFailure("incident ${packet.id}", it)
+                }
+            }
         }
     }
 
-    private fun handleClaim(raw: String) {
+    private fun handleClaim(raw: String, sourceAddress: String?) {
         val packet = RescueClaimPacket.fromJson(raw) ?: run {
             Log.w(TAG, "Malformed RESCUE_CLAIM ignored")
             return
         }
         runOnUiThread {
-            if (!seenClaimIds.add(packet.id)) return@runOnUiThread
-            claimsByIncident[packet.incidentId] = claimsByIncident[packet.incidentId].orEmpty() + packet.asClaim()
+            val plan = planClaimReceipt(packet, packet.id in seenClaimIds)
+            if (!plan.shouldProcess) {
+                Log.i(TAG, "Duplicate claim ignored ${packet.id}")
+                return@runOnUiThread
+            }
+            seenClaimIds.add(packet.id)
+            claimsByIncident[packet.incidentId] = appendClaimIfNew(claimsByIncident[packet.incidentId].orEmpty(), packet.asClaim())
             recordEvent(packet.incidentId, RescueLifecycle.ACCEPTED.name, packet.timestamp, packet.teamId, packet.teamName, packet.callsign, packet.id)
             latestStatusByTeam(statusesByIncident[packet.incidentId].orEmpty())[packet.teamId]?.let {
                 applyDisplayedStatus(packet.incidentId, packet.teamId, it.status)
             }
-            Log.i(TAG, "Claim received: ${packet.id} for ${packet.incidentId}")
+            Log.i(TAG, "Received claim ${packet.id} for ${packet.incidentId}; applied ownership ${packet.teamName}")
             lifecycleScope.launch {
                 runCatching {
                     repository.saveClaim(packet.asClaim())
@@ -503,11 +547,16 @@ class MainActivity : ComponentActivity() {
                     repository.saveProcessed(packet.id, packet.incidentId, packet.type)
                 }.onFailure { persistenceFailure("claim ${packet.id}", it) }
             }
-            if (packet.canRelay() && hasOutgoingScanPermission()) meshSender.send(packet.nextHop())
+            plan.relayPacket?.let {
+                if (hasOutgoingScanPermission()) {
+                    Log.i(TAG, "Relayed claim ${it.id} at hop ${it.hopCount}/${it.ttl}")
+                    meshSender.send(it, sourceAddress, ResponderMeshSender.PeerTarget.RESPONDER)
+                }
+            } ?: Log.i(TAG, "Claim TTL exhausted ${packet.id}")
         }
     }
 
-    private fun handleStatus(raw: String) {
+    private fun handleStatus(raw: String, sourceAddress: String?) {
         val packet = RescueStatusPacket.fromJson(raw) ?: run {
             Log.w(TAG, "Malformed RESCUE_STATUS ignored")
             return
@@ -534,7 +583,7 @@ class MainActivity : ComponentActivity() {
                     incidents.firstOrNull { it.id == packet.incidentId }?.let { repository.saveIncident(it) }
                 }.onFailure { persistenceFailure("status ${packet.id}", it) }
             }
-            if (packet.canRelay() && hasOutgoingScanPermission()) meshSender.send(packet.nextHop())
+            if (packet.canRelay() && hasOutgoingScanPermission()) meshSender.send(packet.nextHop(), sourceAddress, ResponderMeshSender.PeerTarget.RESPONDER)
         }
     }
 
@@ -557,7 +606,15 @@ class MainActivity : ComponentActivity() {
         }
         val index = incidents.indexOfFirst { it.id == incident.id }
         if (index < 0) return incident
-        if (ownershipOf(claimsByIncident[incident.id].orEmpty(), configuredTeam.teamId) != IncidentOwnership.UNCLAIMED) return incident
+        val ownership = ownershipOf(claimsByIncident[incident.id].orEmpty(), configuredTeam.teamId)
+        if (!canAcceptIncident(incident.status, ownership) || handoffLocksAccept(handoffRecords[incident.id])) {
+            val owner = claimsByIncident[incident.id].orEmpty().firstOrNull { it.teamId != configuredTeam.teamId }
+            Log.w(TAG, "Accept blocked: incident owned by ${owner?.teamName ?: ownership.name}")
+            return incident
+        }
+        if (acceptingIncidents[incident.id] == true) return incident
+        meshSender.cancelWarmDiscovery()
+        acceptingIncidents[incident.id] = true
         val accepted = incident.copy(status = "ACCEPTED")
         val claimPacket = RescueClaimPacket.create(accepted, responderLocation, configuredTeam)
         val ackPacket = RescueAckPacket.create(accepted, responderLocation, configuredTeam)
@@ -565,18 +622,41 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             runCatching { repository.persistAcceptance(accepted, claimPacket.asClaim(), event, claimPacket, ackPacket) }
                 .onSuccess {
+                    acceptingIncidents.remove(incident.id)
                     identityError = null; incidents[index] = accepted
                     seenClaimIds.add(claimPacket.id)
-                    claimsByIncident[incident.id] = claimsByIncident[incident.id].orEmpty() + claimPacket.asClaim()
+                    claimsByIncident[incident.id] = appendClaimIfNew(claimsByIncident[incident.id].orEmpty(), claimPacket.asClaim())
                     lifecycleEventsByIncident[incident.id] = recordLifecycleEvent(lifecycleEventsByIncident[incident.id].orEmpty(), event)
                     val claimRecord = ClaimRecord(claimPacket); val ackRecord = AckRecord(ackPacket)
                     claimRecords[incident.id] = claimRecord; ackRecords[incident.id] = ackRecord
-                    Log.i(TAG, "Incident accepted and persisted: ${incident.id}")
+                    Log.i(TAG, "Created claim ${claimPacket.id} for ${incident.id}")
                     queueCloudSync()
                     sendClaim(claimRecord); sendAck(ackRecord)
-                }.onFailure { persistenceFailure("rescue acceptance", it) }
+                }.onFailure {
+                    acceptingIncidents.remove(incident.id)
+                    persistenceFailure("rescue acceptance", it)
+                }
         }
         return incident
+    }
+
+    private fun passIncident(incident: ResponderIncident) {
+        val profile = teamProfile ?: return
+        val ownership = ownershipOf(claimsByIncident[incident.id].orEmpty(), profile.teamId)
+        if (!canAcceptIncident(incident.status, ownership) || handoffLocksAccept(handoffRecords[incident.id]) || acceptingIncidents[incident.id] == true) return
+        Log.i(TAG, "Pass requested ${incident.id}")
+        val record = prepareSosHandoff(incident, handoffRecords[incident.id])
+        handoffRecords[incident.id] = record
+        val relay = record.relayPacket ?: run {
+            Log.i(TAG, "Pass unavailable; TTL exhausted ${incident.id}")
+            return
+        }
+        if (!hasOutgoingScanPermission()) {
+            handoffRecords[incident.id] = record.copy(state = SosHandoffState.FAILED, failureReason = "Bluetooth scan permission required")
+            return
+        }
+        Log.i(TAG, "Passing ${relay.id} hop ${relay.hopCount}/${relay.ttl}")
+        meshSender.send(relay, sosSourceAddresses[incident.id], ResponderMeshSender.PeerTarget.RESPONDER)
     }
 
     private fun advanceLifecycle(incident: ResponderIncident, next: RescueLifecycle) {
@@ -634,7 +714,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         Log.i(TAG, "Sending status ${record.packet.id}")
-        meshSender.send(record.packet)
+        meshSender.send(record.packet, target = ResponderMeshSender.PeerTarget.RESPONDER)
     }
 
     private fun retryClaim(incidentId: String) {
@@ -647,7 +727,8 @@ class MainActivity : ComponentActivity() {
             persistOutgoing(record.packet, AckSendState.FAILED, "Bluetooth scan permission required")
             return
         }
-        meshSender.send(record.packet)
+        Log.i(TAG, "Queued claim ${record.packet.id}")
+        meshSender.send(record.packet, target = ResponderMeshSender.PeerTarget.RESPONDER)
     }
 
     private fun retryAck(incidentId: String) {

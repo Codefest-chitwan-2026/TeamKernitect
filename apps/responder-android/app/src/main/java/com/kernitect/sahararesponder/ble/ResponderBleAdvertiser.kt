@@ -54,6 +54,7 @@ class ResponderBleAdvertiser(
             .build()
         val scanResponse = AdvertiseData.Builder()
             .addServiceUuid(ParcelUuid(BleConstants.ANDROID_NODE_UUID))
+            .addManufacturerData(BleConstants.RESPONDER_MANUFACTURER_ID, BleConstants.RESPONDER_ROLE_MARKER)
             .setIncludeDeviceName(false)
             .setIncludeTxPowerLevel(false)
             .build()

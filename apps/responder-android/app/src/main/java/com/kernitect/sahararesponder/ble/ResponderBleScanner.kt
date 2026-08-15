@@ -18,6 +18,8 @@ class ResponderBleScanner(
 ) {
     private val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
     private var scanning = false
+    private var excludedAddress: String? = null
+    private var responderOnly = false
     private val callback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) = inspect(result)
         override fun onBatchScanResults(results: MutableList<ScanResult>) = results.forEach(::inspect)
@@ -32,6 +34,10 @@ class ResponderBleScanner(
         if (!scanning) return
         val services = result.scanRecord?.serviceUuids?.map { it.uuid }.orEmpty()
         if (!services.contains(BleConstants.ANDROID_NODE_UUID)) return
+        if (excludedAddress != null && safeAddress(result.device).equals(excludedAddress, ignoreCase = true)) return
+        if (responderOnly && !isResponderAdvertisement(
+                result.scanRecord?.getManufacturerSpecificData(BleConstants.RESPONDER_MANUFACTURER_ID),
+            )) return
         scanning = false
         stopInternal()
         Log.i(TAG, "Relay found: ${safeAddress(result.device)}")
@@ -39,8 +45,10 @@ class ResponderBleScanner(
     }
 
     @SuppressLint("MissingPermission")
-    fun start() {
+    fun start(excludeAddress: String? = null, requireResponderPeer: Boolean = false) {
         stop()
+        excludedAddress = excludeAddress
+        responderOnly = requireResponderPeer
         val scanner = adapter?.bluetoothLeScanner ?: run {
             onFailure("BLE scanner unavailable")
             return

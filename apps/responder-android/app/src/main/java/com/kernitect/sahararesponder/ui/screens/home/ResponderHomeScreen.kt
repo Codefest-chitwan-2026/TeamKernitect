@@ -67,10 +67,11 @@ fun ResponderHomeScreen(
         } else {
             items(newest, key = { it.id }) { incident ->
                 Box(Modifier.padding(horizontal = 20.dp)) {
-                    val ownership = ownershipOf(claimsByIncident[incident.id].orEmpty(), teamProfile.teamId)
+                    val incidentClaims = claimsByIncident[incident.id].orEmpty()
+                    val ownership = ownershipOf(incidentClaims, teamProfile.teamId)
                     val latest = lifecycleEventsByIncident[incident.id].orEmpty().maxByOrNull { it.timestamp }
                     val progress = latest?.let { "${it.status.displayName} • ${formatLifecycleTime(it.timestamp)}" }
-                    CompactIncidentCard(incident, assignmentLabel = listOfNotNull(ownership.label(), progress).joinToString(" • ")) { onViewDetails(incident) }
+                    CompactIncidentCard(incident, assignmentLabel = listOfNotNull(ownership.label(incidentClaims, teamProfile.teamId), progress).joinToString(" • ")) { onViewDetails(incident) }
                 }
             }
         }
@@ -95,10 +96,11 @@ private fun CloudSyncCard(summary: CloudSyncSummary, onSyncNow: () -> Unit) {
     }
 }
 
-private fun IncidentOwnership.label() = when (this) {
+private fun IncidentOwnership.label(claims: List<IncidentClaim>, localTeamId: String) = when (this) {
     IncidentOwnership.UNCLAIMED -> "Unclaimed"
     IncidentOwnership.CLAIMED_BY_ME -> "Claimed by your team"
-    IncidentOwnership.CLAIMED_BY_OTHER -> "Claimed by another team"
+    IncidentOwnership.CLAIMED_BY_OTHER -> claims.firstOrNull { it.teamId != localTeamId }
+        ?.let { "Assigned to ${it.teamName} • ${it.callsign}" } ?: "Claimed by another team"
     IncidentOwnership.CONFLICT -> "Claim conflict"
 }
 
