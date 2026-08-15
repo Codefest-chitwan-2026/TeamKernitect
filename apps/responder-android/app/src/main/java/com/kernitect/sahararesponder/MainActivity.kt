@@ -67,6 +67,7 @@ import com.kernitect.sahararesponder.ui.screens.active.ActiveRescuesScreen
 import com.kernitect.sahararesponder.ui.screens.home.ResponderHomeScreen
 import com.kernitect.sahararesponder.ui.screens.incident.IncidentDetailsScreen
 import com.kernitect.sahararesponder.ui.screens.map.ResponderMapScreen
+import com.kernitect.sahararesponder.ui.screens.notifications.ResponderNotificationsScreen
 import com.kernitect.sahararesponder.ui.screens.setup.PendingApprovalScreen
 import com.kernitect.sahararesponder.ui.screens.setup.RejectedRegistrationScreen
 import com.kernitect.sahararesponder.ui.screens.setup.ResponderRegistrationScreen
@@ -75,6 +76,11 @@ import org.osmdroid.config.Configuration
 import org.json.JSONObject
 import com.kernitect.sahararesponder.persistence.*
 import com.kernitect.sahararesponder.sync.*
+import com.kernitect.sahararesponder.model.responderNotifications
+import com.kernitect.sahararesponder.model.resolveNotificationIncident
+import com.kernitect.sahararesponder.model.unreadNotificationCount
+import com.kernitect.sahararesponder.model.markCurrentNotificationsSeen
+import com.kernitect.sahararesponder.model.ResponderNotificationSeenStore
 
 class MainActivity : ComponentActivity() {
     private var meshStatus by mutableStateOf("Starting RESCUEMESH")
@@ -110,6 +116,8 @@ class MainActivity : ComponentActivity() {
     private var operationalDataLoading by mutableStateOf(false)
     private var operationalRestoreStarted = false
     private var cloudSyncSummary by mutableStateOf(CloudSyncSummary(0, 0, 0))
+    private lateinit var notificationSeenStore: ResponderNotificationSeenStore
+    private var seenNotificationIds by mutableStateOf<Set<String>>(emptySet())
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
         if (hasRequiredPermissions()) startReceiverIfReady() else {
@@ -132,6 +140,8 @@ class MainActivity : ComponentActivity() {
         Configuration.getInstance().load(applicationContext, PreferenceManager.getDefaultSharedPreferences(applicationContext))
         Configuration.getInstance().userAgentValue = packageName
         identityStore = ResponderIdentityStore(applicationContext)
+        notificationSeenStore = ResponderNotificationSeenStore(applicationContext)
+        seenNotificationIds = notificationSeenStore.load()
         repository = ResponderRepository(ResponderDatabase.get(applicationContext))
         androidx.work.WorkManager.getInstance(applicationContext)
             .getWorkInfosForUniqueWorkLiveData(CloudSyncScheduler.UNIQUE_WORK)
@@ -225,6 +235,13 @@ class MainActivity : ComponentActivity() {
                     }
                 } else {
                 var destination by remember { mutableStateOf(ResponderDestination.HOME) }
+                androidx.compose.runtime.LaunchedEffect(destination) {
+                    if (destination == ResponderDestination.NOTIFICATIONS) {
+                        val notifications = responderNotifications(incidents, lifecycleEventsByIncident)
+                        seenNotificationIds = markCurrentNotificationsSeen(seenNotificationIds, notifications)
+                        notificationSeenStore.save(seenNotificationIds)
+                    }
+                }
                 var selectedIncident by remember { mutableStateOf<ResponderIncident?>(null) }
                 var focusedMapIncident by remember { mutableStateOf<ResponderIncident?>(null) }
                 BackHandler(enabled = focusedMapIncident != null) { focusedMapIncident = null }
@@ -289,6 +306,11 @@ class MainActivity : ComponentActivity() {
                                 lifecycleEventsByIncident = lifecycleEventsByIncident,
                                 cloudSyncSummary = cloudSyncSummary,
                                 onSyncNow = ::queueCloudSync,
+                                onOpenNotifications = { destination = ResponderDestination.NOTIFICATIONS },
+                                unreadNotificationCount = unreadNotificationCount(
+                                    responderNotifications(incidents, lifecycleEventsByIncident),
+                                    seenNotificationIds,
+                                ),
                                 modifier = Modifier.padding(padding),
                             )
                             ResponderDestination.MAP -> ResponderMapScreen(
@@ -306,6 +328,13 @@ class MainActivity : ComponentActivity() {
                                 claimsByIncident = claimsByIncident,
                                 lifecycleEventsByIncident = lifecycleEventsByIncident,
                                 onViewDetails = { selectedIncident = it },
+                                modifier = Modifier.padding(padding),
+                            )
+                            ResponderDestination.NOTIFICATIONS -> ResponderNotificationsScreen(
+                                notifications = responderNotifications(incidents, lifecycleEventsByIncident),
+                                onOpenIncident = { notification ->
+                                    selectedIncident = resolveNotificationIncident(notification, incidents)
+                                },
                                 modifier = Modifier.padding(padding),
                             )
                         }

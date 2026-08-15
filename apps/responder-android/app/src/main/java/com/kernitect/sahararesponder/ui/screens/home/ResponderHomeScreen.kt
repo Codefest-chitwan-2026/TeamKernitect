@@ -31,6 +31,8 @@ fun ResponderHomeScreen(
     lifecycleEventsByIncident: Map<String, List<RescueLifecycleEvent>>,
     cloudSyncSummary: CloudSyncSummary,
     onSyncNow: () -> Unit,
+    onOpenNotifications: () -> Unit,
+    unreadNotificationCount: Int,
     modifier: Modifier = Modifier,
 ) {
     val newest = incidents.sortedByDescending { it.receivedAt }
@@ -46,7 +48,7 @@ fun ResponderHomeScreen(
         contentPadding = PaddingValues(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        item { ResponderTopBar(newCount) }
+        item { ResponderTopBar(unreadNotificationCount, onOpenNotifications) }
         item { Box(Modifier.padding(horizontal = 20.dp)) { TeamIdentityCard(teamProfile) } }
         item { Box(Modifier.padding(horizontal = 20.dp)) { MeshStatusCard(meshStatus) } }
         item { Box(Modifier.padding(horizontal = 20.dp)) { CloudSyncCard(cloudSyncSummary, onSyncNow) } }
