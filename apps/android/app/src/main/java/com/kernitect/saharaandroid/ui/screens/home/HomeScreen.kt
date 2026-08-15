@@ -19,6 +19,9 @@ import com.kernitect.saharaandroid.ui.components.TrackingSection
 fun HomeScreen(
     onMapClick: () -> Unit,
 
+    unreadNotificationCount: Int = 0,
+    onNotificationClick: () -> Unit = {},
+
     onSendHelpRequest: (
         disasterType: String,
         peopleCount: String,
@@ -44,7 +47,13 @@ fun HomeScreen(
     ) {
 
         SaharaTopBar(
-            title = "Home"
+            title = "Home",
+
+            unreadCount =
+                unreadNotificationCount,
+
+            onNotificationClick =
+                onNotificationClick
         )
 
         EmergencyCard(

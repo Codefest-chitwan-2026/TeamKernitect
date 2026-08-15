@@ -19,6 +19,8 @@ import com.kernitect.saharaandroid.ui.components.SendProgressDialog
 import com.kernitect.saharaandroid.ui.components.SendProgressState
 import com.kernitect.saharaandroid.ui.theme.SaharaAndroidTheme
 import kotlinx.coroutines.delay
+import androidx.compose.runtime.mutableStateListOf
+import com.kernitect.saharaandroid.model.ReceivedAlert
 
 class MainActivity : ComponentActivity() {
 
@@ -37,6 +39,30 @@ class MainActivity : ComponentActivity() {
 
                 var gettingLocation by remember {
                     mutableStateOf(false)
+                }
+
+                /*
+                 * All SOS/help packets this phone
+                 * has received from another mesh node.
+                 */
+                val receivedAlerts =
+                    remember {
+                        mutableStateListOf<ReceivedAlert>()
+                    }
+
+                /*
+                 * IDs that haven't been viewed
+                 * through the bell screen yet.
+                 */
+                val unreadAlertIds =
+                    remember {
+                        mutableStateListOf<String>()
+                    }
+
+                var activeIncomingAlert by remember {
+                    mutableStateOf<ReceivedAlert?>(
+                        null
+                    )
                 }
 
                 /*
@@ -173,6 +199,38 @@ class MainActivity : ComponentActivity() {
                                 status =
                                     "${packet.priority} request received - " +
                                             "Hop ${packet.hopCount}/${packet.ttl}"
+
+                                val alert =
+                                    ReceivedAlert(
+                                        packet = packet
+                                    )
+
+                                /*
+                                 * Permanent in-app notification list.
+                                 */
+                                receivedAlerts.add(
+                                    index = 0,
+                                    element = alert
+                                )
+
+                                /*
+                                 * Unread bell counter.
+                                 */
+                                if (
+                                    !unreadAlertIds.contains(
+                                        packet.id
+                                    )
+                                ) {
+                                    unreadAlertIds.add(
+                                        packet.id
+                                    )
+                                }
+
+                                /*
+                                 * Temporary heads-up banner.
+                                 */
+                                activeIncomingAlert =
+                                    alert
                             },
 
                             onPacketSent = {
@@ -301,6 +359,25 @@ class MainActivity : ComponentActivity() {
                 }
 
                 SaharaApp(
+
+                    receivedAlerts =
+                        receivedAlerts,
+
+                    unreadNotificationCount =
+                        unreadAlertIds.size,
+
+                    incomingAlert =
+                        activeIncomingAlert,
+
+                    onIncomingAlertDismissed = {
+                        activeIncomingAlert =
+                            null
+                    },
+
+                    onNotificationsOpened = {
+
+                        unreadAlertIds.clear()
+                    },
 
                     /*
                      * =============================
