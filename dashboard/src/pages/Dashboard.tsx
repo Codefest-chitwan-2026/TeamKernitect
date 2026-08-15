@@ -1,6 +1,7 @@
 import NotificationItem from "../components/NotificationItem";
 import StatCard from "../components/StatCard";
 import EmergencyMap from "../components/EmergencyMap";
+import ResponderIncidentCard from "../components/ResponderIncidentCard";
 
 import type { Sos, SosStats } from "../services/api";
 
@@ -16,6 +17,8 @@ export default function Dashboard({
   const totalActive = stats?.total ?? sosItems.length;
   const responding = stats?.responding ?? 0;
   const resolved = stats?.resolved ?? 0;
+  const assigned = sosItems.filter(item => item.assignedTeamId).length;
+  const rescued = sosItems.filter(item => item.currentLifecycleStatus === "RESCUED").length;
 
   return (
     <div className="space-y-6">
@@ -39,22 +42,26 @@ export default function Dashboard({
 
         <StatCard
           title="Available Rescue Teams"
-          value="05"
-          subtitle="Teams ready for deployment"
+          value={String(assigned).padStart(2, "0")}
+          subtitle="Emergencies assigned to responders"
           type="available"
         />
 
         <StatCard
           title="Teams On Mission"
-          value={String(responding).padStart(2, "0")}
-          subtitle="Teams currently responding"
+          value={String(rescued).padStart(2, "0")}
+          subtitle="Rescues synchronized as completed"
           type="active"
         />
 
       </div>
 
       {/* Map */}
-      <EmergencyMap />
+      <EmergencyMap sosItems={sosItems} />
+
+      <section className="space-y-3"><div><h2 className="font-semibold text-gray-900">Responder Operations</h2><p className="text-xs text-gray-500">Last successfully synchronized field activity; offline teams may have newer local state.</p></div>
+        {sosItems.length === 0 ? <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500">No emergencies available.</div> : sosItems.map(item => <ResponderIncidentCard key={item.id} incident={item} />)}
+      </section>
 
       {/* Bottom section */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

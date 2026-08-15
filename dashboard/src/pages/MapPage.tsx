@@ -1,6 +1,7 @@
 import EmergencyMap from "../components/EmergencyMap";
+import type { Sos } from "../services/api";
 
-export default function MapPage() {
+export default function MapPage({ sosItems }: { sosItems: Sos[] }) {
   return (
     <div className="space-y-6">
       <div>
@@ -13,7 +14,7 @@ export default function MapPage() {
         </p>
       </div>
 
-      <EmergencyMap />
+      <EmergencyMap sosItems={sosItems} />
     </div>
   );
 }

@@ -47,7 +47,24 @@ export interface Sos {
   receivedAt?: string;
   updatedAt?: string;
   statusUpdatedAt?: string;
+  assignedTeamId?: string | null;
+  assignedTeamName?: string | null;
+  assignedResponderId?: string | null;
+  callsign?: string | null;
+  currentLifecycleStatus?: RescueLifecycle | null;
+  acceptedAt?: number;
+  onTheWayAt?: number;
+  nearbyAt?: number;
+  arrivedAt?: number;
+  rescuedAt?: number;
+  lastResponderLatitude?: number | null;
+  lastResponderLongitude?: number | null;
+  lastResponderSyncAt?: string;
+  claimTeamIds?: string[];
+  claimConflict?: boolean;
 }
+
+export type RescueLifecycle = "ACCEPTED" | "ON_THE_WAY" | "NEARBY" | "ARRIVED" | "RESCUED";
 
 
 export interface SosListResponse {
