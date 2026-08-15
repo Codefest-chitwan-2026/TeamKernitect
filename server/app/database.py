@@ -28,6 +28,7 @@ database = client[MONGODB_DB_NAME]
 sos_collection = database["sos"]
 responders_collection = database["responders"]
 rescue_teams_collection = database["rescue_teams"]
+responder_rescue_events_collection = database["responder_rescue_events"]
 
 
 async def ping_database() -> None:
@@ -47,6 +48,8 @@ async def ensure_indexes() -> None:
     await responders_collection.create_index("responderId", unique=True)
     await responders_collection.create_index("deviceId", unique=True)
     await rescue_teams_collection.create_index("teamId", unique=True)
+    await responder_rescue_events_collection.create_index("eventId", unique=True)
+    await responder_rescue_events_collection.create_index([("incidentId", 1), ("eventTimestamp", 1)])
 
 
 async def seed_rescue_teams() -> None:
