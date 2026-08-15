@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,6 +18,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
@@ -24,7 +26,12 @@ import com.kernitect.sahararesponder.ble.ResponderBleAdvertiser
 import com.kernitect.sahararesponder.ble.ResponderBleServer
 import com.kernitect.sahararesponder.model.RescuePacket
 import com.kernitect.sahararesponder.model.ResponderIncident
+import com.kernitect.sahararesponder.ui.components.ResponderBottomBar
+import com.kernitect.sahararesponder.ui.navigation.ResponderDestination
+import com.kernitect.sahararesponder.ui.screens.active.ActiveRescuesScreen
 import com.kernitect.sahararesponder.ui.screens.home.ResponderHomeScreen
+import com.kernitect.sahararesponder.ui.screens.incident.IncidentDetailsScreen
+import com.kernitect.sahararesponder.ui.screens.map.ResponderMapPlaceholderScreen
 import com.kernitect.sahararesponder.ui.theme.SaharaResponderTheme
 
 class MainActivity : ComponentActivity() {
@@ -54,8 +61,38 @@ class MainActivity : ComponentActivity() {
         )
         setContent {
             SaharaResponderTheme {
-                Scaffold(Modifier.fillMaxSize()) { padding ->
-                    ResponderHomeScreen(meshStatus, incidents, Modifier.padding(padding))
+                var destination by remember { mutableStateOf(ResponderDestination.HOME) }
+                var selectedIncident by remember { mutableStateOf<ResponderIncident?>(null) }
+                BackHandler(enabled = selectedIncident != null) { selectedIncident = null }
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    bottomBar = {
+                        if (selectedIncident == null) {
+                            ResponderBottomBar(destination) { destination = it }
+                        }
+                    },
+                ) { padding ->
+                    val selected = selectedIncident
+                    if (selected != null) {
+                        IncidentDetailsScreen(selected, onBack = { selectedIncident = null }, modifier = Modifier.padding(padding))
+                    } else {
+                        when (destination) {
+                            ResponderDestination.HOME -> ResponderHomeScreen(
+                                meshStatus = meshStatus,
+                                incidents = incidents,
+                                onViewDetails = { selectedIncident = it },
+                                modifier = Modifier.padding(padding),
+                            )
+                            ResponderDestination.MAP -> ResponderMapPlaceholderScreen(
+                                incidentCount = incidents.size,
+                                modifier = Modifier.padding(padding),
+                            )
+                            ResponderDestination.ACTIVE -> ActiveRescuesScreen(
+                                activeCount = incidents.count { it.status in ACTIVE_STATUSES },
+                                modifier = Modifier.padding(padding),
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -127,5 +164,8 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    private companion object { const val TAG = "SaharaResponder" }
+    private companion object {
+        const val TAG = "SaharaResponder"
+        val ACTIVE_STATUSES = setOf("ACCEPTED", "ON_THE_WAY", "NEARBY", "ARRIVED")
+    }
 }
