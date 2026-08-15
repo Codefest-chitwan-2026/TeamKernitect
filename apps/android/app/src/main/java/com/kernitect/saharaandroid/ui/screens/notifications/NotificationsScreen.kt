@@ -24,6 +24,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,8 +40,10 @@ import java.util.Locale
 @Composable
 fun NotificationsScreen(
     alerts: List<ReceivedAlert>,
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    onViewDetails: (ReceivedAlert) -> Unit
 ) {
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -49,6 +52,9 @@ fun NotificationsScreen(
             )
     ) {
 
+        /*
+         * Header
+         */
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -56,45 +62,68 @@ fun NotificationsScreen(
         ) {
 
             IconButton(
-                onClick = onBackClick,
-                modifier = Modifier.align(
-                    Alignment.CenterStart
-                )
+                onClick =
+                    onBackClick,
+
+                modifier =
+                    Modifier.align(
+                        Alignment.CenterStart
+                    )
             ) {
+
                 Icon(
                     imageVector =
                         Icons.Default.ArrowBack,
+
                     contentDescription =
                         "Back",
-                    tint = Color.Black
+
+                    tint =
+                        Color.Black
                 )
             }
 
             Text(
-                text = "Notifications",
-                modifier = Modifier.align(
-                    Alignment.Center
-                ),
-                fontSize = 19.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.Black
+                text =
+                    "Notifications",
+
+                modifier =
+                    Modifier.align(
+                        Alignment.Center
+                    ),
+
+                fontSize =
+                    19.sp,
+
+                fontWeight =
+                    FontWeight.Bold,
+
+                color =
+                    Color.Black
             )
         }
 
-        if (alerts.isEmpty()) {
+        if (
+            alerts.isEmpty()
+        ) {
 
             Box(
-                modifier = Modifier
-                    .fillMaxSize(),
+                modifier =
+                    Modifier.fillMaxSize(),
+
                 contentAlignment =
                     Alignment.Center
             ) {
+
                 Text(
                     text =
                         "No SOS notifications yet.",
+
                     color =
                         Color(0xFF777777),
-                    fontSize = 14.sp
+
+                    fontSize =
+                        14.sp
                 )
             }
 
@@ -111,14 +140,25 @@ fun NotificationsScreen(
             ) {
 
                 items(
-                    items = alerts,
+                    items =
+                        alerts,
+
                     key = {
                         it.packet.id
                     }
-                ) { alert ->
+                ) {
+                        alert ->
 
                     NotificationCard(
-                        alert = alert
+                        alert =
+                            alert,
+
+                        onViewDetails = {
+
+                            onViewDetails(
+                                alert
+                            )
+                        }
                     )
                 }
             }
@@ -128,28 +168,16 @@ fun NotificationsScreen(
 
 @Composable
 private fun NotificationCard(
-    alert: ReceivedAlert
+    alert: ReceivedAlert,
+    onViewDetails: () -> Unit
 ) {
+
     val packet =
         alert.packet
 
     val critical =
         packet.priority ==
                 "CRITICAL"
-
-    val cardColor =
-        if (critical) {
-            Color(0xFFFFEEEE)
-        } else {
-            Color(0xFFF4F4F4)
-        }
-
-    val borderColor =
-        if (critical) {
-            Color(0xFFE60000)
-        } else {
-            Color(0xFFCCCCCC)
-        }
 
     Card(
         modifier =
@@ -162,14 +190,25 @@ private fun NotificationCard(
 
         border =
             BorderStroke(
-                width = 1.dp,
-                color = borderColor
+                width =
+                    1.dp,
+
+                color =
+                    if (critical) {
+                        Color(0xFFE60000)
+                    } else {
+                        Color(0xFFCCCCCC)
+                    }
             ),
 
         colors =
             CardDefaults.cardColors(
                 containerColor =
-                    cardColor
+                    if (critical) {
+                        Color(0xFFFFEEEE)
+                    } else {
+                        Color(0xFFF4F4F4)
+                    }
             )
     ) {
 
@@ -189,13 +228,16 @@ private fun NotificationCard(
             ) {
 
                 Surface(
-                    shape = CircleShape,
+                    shape =
+                        CircleShape,
+
                     color =
                         if (critical) {
                             Color(0xFFE60000)
                         } else {
-                            Color(0xFF555555)
+                            Color(0xFFDD7600)
                         },
+
                     modifier =
                         Modifier.size(
                             9.dp
@@ -218,7 +260,9 @@ private fun NotificationCard(
                         },
 
                     modifier =
-                        Modifier.weight(1f),
+                        Modifier.weight(
+                            1f
+                        ),
 
                     color =
                         if (critical) {
@@ -227,7 +271,8 @@ private fun NotificationCard(
                             Color.Black
                         },
 
-                    fontSize = 14.sp,
+                    fontSize =
+                        14.sp,
 
                     fontWeight =
                         FontWeight.Bold
@@ -255,45 +300,71 @@ private fun NotificationCard(
             )
 
             Text(
-                text = packet.message,
-                fontSize = 13.sp,
-                color = Color.Black
+                text =
+                    packet.message,
+
+                fontSize =
+                    13.sp,
+
+                color =
+                    Color.Black,
+
+                maxLines =
+                    2
             )
 
-            Spacer(
+            Row(
                 modifier =
-                    Modifier.height(
-                        10.dp
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            top = 8.dp
+                        ),
+
+                verticalAlignment =
+                    Alignment.CenterVertically
+            ) {
+
+                Text(
+                    text =
+                        "Hop ${packet.hopCount}/${packet.ttl}",
+
+                    modifier =
+                        Modifier.weight(
+                            1f
+                        ),
+
+                    fontSize =
+                        10.sp,
+
+                    color =
+                        Color(0xFF777777)
+                )
+
+                TextButton(
+                    onClick =
+                        onViewDetails
+                ) {
+
+                    Text(
+                        text =
+                            "View Details →",
+
+                        color =
+                            if (critical) {
+                                Color(0xFFE60000)
+                            } else {
+                                Color(0xFFDD7600)
+                            },
+
+                        fontWeight =
+                            FontWeight.Bold,
+
+                        fontSize =
+                            11.sp
                     )
-            )
-
-            Text(
-                text =
-                    "Location: " +
-                            "${packet.latitude}, ${packet.longitude}",
-
-                fontSize =
-                    11.sp,
-
-                color =
-                    Color(0xFF555555)
-            )
-
-            Text(
-                text =
-                    "Hop: ${packet.hopCount}/${packet.ttl}",
-
-                modifier =
-                    Modifier.padding(
-                        top = 3.dp
-                    ),
-
-                fontSize =
-                    11.sp,
-
-                color =
-                    Color(0xFF555555)
-            )
+                }
+            }
         }
     }
 }

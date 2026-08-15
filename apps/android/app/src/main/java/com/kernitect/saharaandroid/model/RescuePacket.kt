@@ -4,22 +4,55 @@ import org.json.JSONObject
 import java.util.UUID
 
 data class RescuePacket(
+
     val id: String,
+
     val type: String,
+
     val latitude: Double,
+
     val longitude: Double,
+
     val timestamp: Long,
+
     val hopCount: Int,
+
     val ttl: Int,
+
     val priority: String,
-    val message: String
+
+    val message: String,
+
+    /*
+     * Environmental context determined from
+     * locally stored public emergency alerts.
+     *
+     * This is NOT treated as confirmed cause.
+     */
+    val likelyDisaster: String =
+        DISASTER_UNKNOWN,
+
+    /*
+     * Severity of the local public-alert zone
+     * containing the sender.
+     */
+    val areaSeverity: String =
+        SEVERITY_UNKNOWN
 ) {
 
     fun toJson(): String =
+
         JSONObject().apply {
 
-            put("id", id)
-            put("type", type)
+            put(
+                "id",
+                id
+            )
+
+            put(
+                "type",
+                type
+            )
 
             put(
                 "latitude",
@@ -56,21 +89,51 @@ data class RescuePacket(
                 message
             )
 
+            /*
+             * Disaster-awareness fields.
+             */
+            put(
+                "likelyDisaster",
+                likelyDisaster
+            )
+
+            put(
+                "areaSeverity",
+                areaSeverity
+            )
+
         }.toString()
 
+
     fun canRelay(): Boolean =
+
         hopCount < ttl
 
+
+    /*
+     * copy() preserves:
+     *
+     * - original GPS
+     * - original timestamp
+     * - disaster context
+     * - priority
+     * - message
+     *
+     * Only hopCount changes.
+     */
     fun nextHop(): RescuePacket =
+
         copy(
             hopCount =
                 hopCount + 1
         )
 
+
     companion object {
 
         const val TYPE_SOS =
             "SOS"
+
 
         const val PRIORITY_NORMAL =
             "NORMAL"
@@ -81,18 +144,83 @@ data class RescuePacket(
         const val PRIORITY_CRITICAL =
             "CRITICAL"
 
+
         const val DEFAULT_TTL =
             5
 
+
         /*
-         * Big red SOS button.
+         * Used when no locally stored public
+         * disaster alert matches the sender's GPS.
+         */
+        const val DISASTER_UNKNOWN =
+            "UNKNOWN"
+
+        const val SEVERITY_UNKNOWN =
+            "UNKNOWN"
+
+
+        /*
+         * ==========================================
+         * CRITICAL SOS
+         * ==========================================
+         *
+         * Big red emergency button.
          */
         fun createCriticalSos(
+
             latitude: Double,
-            longitude: Double
+
+            longitude: Double,
+
+            likelyDisaster: String =
+                DISASTER_UNKNOWN,
+
+            areaSeverity: String =
+                SEVERITY_UNKNOWN
+
         ): RescuePacket {
 
+
+            /*
+             * Keep the environmental information
+             * human-readable too.
+             *
+             * Existing notification/details screens
+             * already display packet.message.
+             */
+            val message =
+
+                if (
+                    likelyDisaster !=
+                    DISASTER_UNKNOWN
+                ) {
+
+                    "Critical emergency SOS" +
+                            " | Likely disaster: ${
+                                likelyDisaster
+                                    .replace(
+                                        "_",
+                                        " "
+                                    )
+                            }" +
+                            " | Area severity: ${
+                                areaSeverity
+                                    .replace(
+                                        "_",
+                                        " "
+                                    )
+                            }"
+
+                } else {
+
+                    "Critical emergency SOS" +
+                            " | Likely disaster: UNKNOWN"
+                }
+
+
             return RescuePacket(
+
                 id =
                     UUID.randomUUID()
                         .toString(),
@@ -119,31 +247,55 @@ data class RescuePacket(
                     PRIORITY_CRITICAL,
 
                 message =
-                    "Critical emergency SOS"
+                    message,
+
+                likelyDisaster =
+                    likelyDisaster,
+
+                areaSeverity =
+                    areaSeverity
             )
         }
 
+
         /*
-         * Non-emergency help form.
+         * ==========================================
+         * NORMAL HELP REQUEST
+         * ==========================================
+         *
+         * This remains based on what the citizen
+         * explicitly reports.
+         *
+         * We are NOT automatically overriding their
+         * selected problem using area-alert context.
          */
         fun createHelpRequest(
+
             latitude: Double,
+
             longitude: Double,
+
             disasterType: String,
+
             peopleCount: String,
+
             explanation: String
+
         ): RescuePacket {
 
             val messageParts =
                 mutableListOf<String>()
 
+
             messageParts.add(
                 disasterType
             )
 
+
             messageParts.add(
                 "People: $peopleCount"
             )
+
 
             if (
                 explanation
@@ -155,7 +307,9 @@ data class RescuePacket(
                 )
             }
 
+
             return RescuePacket(
+
                 id =
                     UUID.randomUUID()
                         .toString(),
@@ -185,10 +339,22 @@ data class RescuePacket(
                     messageParts
                         .joinToString(
                             separator = " | "
-                        )
+                        ),
+
+                likelyDisaster =
+                    DISASTER_UNKNOWN,
+
+                areaSeverity =
+                    SEVERITY_UNKNOWN
             )
         }
 
+
+        /*
+         * ==========================================
+         * JSON → PACKET
+         * ==========================================
+         */
         fun fromJson(
             json: String
         ): RescuePacket? {
@@ -200,7 +366,9 @@ data class RescuePacket(
                         json
                     )
 
+
                 RescuePacket(
+
                     id =
                         obj.getString(
                             "id"
@@ -236,10 +404,10 @@ data class RescuePacket(
                             "ttl"
                         ),
 
+
                     /*
-                     * Defaults make this compatible
-                     * with any older packets that
-                     * don't contain these fields.
+                     * Backward compatibility with
+                     * older RESCUEMESH packets.
                      */
                     priority =
                         obj.optString(
@@ -247,10 +415,31 @@ data class RescuePacket(
                             PRIORITY_CRITICAL
                         ),
 
+
                     message =
                         obj.optString(
                             "message",
                             "Critical emergency SOS"
+                        ),
+
+
+                    /*
+                     * Older phones may send packets
+                     * without these fields.
+                     *
+                     * They remain valid.
+                     */
+                    likelyDisaster =
+                        obj.optString(
+                            "likelyDisaster",
+                            DISASTER_UNKNOWN
+                        ),
+
+
+                    areaSeverity =
+                        obj.optString(
+                            "areaSeverity",
+                            SEVERITY_UNKNOWN
                         )
                 )
 

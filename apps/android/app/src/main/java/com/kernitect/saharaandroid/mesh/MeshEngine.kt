@@ -30,12 +30,31 @@ class MeshEngine(
         private const val TAG =
             "SAHARA_MESH"
 
+
+        /*
+         * Prefer a phone relay briefly.
+         */
         private const val ANDROID_SCAN_MS =
             3_000L
 
+
+        /*
+         * Background discovery can take longer,
+         * so give the gateway substantially more
+         * time than the old 12-second window.
+         */
         private const val FALLBACK_SCAN_MS =
-            12_000L
+            30_000L
+
+
+        /*
+         * Become available again shortly after
+         * forwarding a packet.
+         */
+        private const val READVERTISE_DELAY_MS =
+            2_500L
     }
+
 
     private enum class ScanPhase {
 
@@ -44,49 +63,59 @@ class MeshEngine(
         ANY_RESCUEMESH
     }
 
+
     private val appContext =
         context.applicationContext
+
 
     private val mainHandler =
         Handler(
             Looper.getMainLooper()
         )
 
+
     private val relayManager =
         RelayManager()
+
 
     private var started =
         false
 
-    /*
-     * Packet stays here until successful write.
-     */
+
     private var pendingPacket:
             RescuePacket? = null
 
-    /*
-     * Non-null while sending.
-     */
+
     private var sendingPacket:
             RescuePacket? = null
 
-    /*
-     * Extra safeguard against immediate loopback.
-     */
+
     private var excludedAddress:
             String? = null
+
 
     private var sendingAddress:
             String? = null
 
+
     private var scanPhase:
             ScanPhase? = null
 
+
+    /*
+     * =========================================
+     * BLE ADVERTISER
+     * =========================================
+     */
+
     private val advertiser =
         BleAdvertiser(
-            context = appContext,
 
-            onStatusChanged = { status ->
+            context =
+                appContext,
+
+            onStatusChanged = {
+                    status ->
 
                 postStatus(
                     "Advertiser: $status"
@@ -94,24 +123,39 @@ class MeshEngine(
             }
         )
 
+
+    /*
+     * =========================================
+     * BLE SCANNER
+     * =========================================
+     */
+
     private val scanner =
         BleScanner(
-            context = appContext,
+
+            context =
+                appContext,
 
             onDeviceFound = {
                     device,
                     rssi ->
 
+
                 mainHandler.post {
 
                     handleDeviceFound(
-                        device = device,
-                        rssi = rssi
+
+                        device =
+                            device,
+
+                        rssi =
+                            rssi
                     )
                 }
             },
 
-            onStatusChanged = { status ->
+            onStatusChanged = {
+                    status ->
 
                 postStatus(
                     "Scanner: $status"
@@ -119,11 +163,21 @@ class MeshEngine(
             }
         )
 
+
+    /*
+     * =========================================
+     * GATT CLIENT
+     * =========================================
+     */
+
     private val gattClient =
         BleGattClient(
-            context = appContext,
 
-            onStatusChanged = { status ->
+            context =
+                appContext,
+
+            onStatusChanged = {
+                    status ->
 
                 postStatus(
                     "Client: $status"
@@ -139,24 +193,39 @@ class MeshEngine(
             }
         )
 
+
+    /*
+     * =========================================
+     * GATT SERVER
+     * =========================================
+     */
+
     private val gattServer =
         BleGattServer(
-            context = appContext,
+
+            context =
+                appContext,
 
             onMessageReceived = {
                     device,
                     message ->
 
+
                 mainHandler.post {
 
                     handleIncomingMessage(
-                        sourceDevice = device,
-                        rawMessage = message
+
+                        sourceDevice =
+                            device,
+
+                        rawMessage =
+                            message
                     )
                 }
             },
 
-            onStatusChanged = { status ->
+            onStatusChanged = {
+                    status ->
 
                 postStatus(
                     "Server: $status"
@@ -171,16 +240,30 @@ class MeshEngine(
                         "GATT ready. Starting advertisement..."
                     )
 
-                    advertiser.startAdvertising()
+
+                    advertiser
+                        .startAdvertising()
                 }
             }
         )
 
+
     /*
-     * Phase 1 timeout.
+     * =========================================
+     * ANDROID PREFERENCE TIMEOUT
+     * =========================================
      *
-     * No Android phone found → try gateway.
+     * Critical improvement:
+     *
+     * While looking for Android, BleScanner also
+     * remembers a Windows/non-Android gateway.
+     *
+     * After 3 seconds:
+     *
+     * 1. use remembered gateway immediately, or
+     * 2. perform a longer fallback scan.
      */
+
     private val androidScanTimeoutRunnable =
         Runnable {
 
@@ -194,25 +277,78 @@ class MeshEngine(
                 return@Runnable
             }
 
-            scanner.stopScanning()
+
+            /*
+             * Grab a gateway that may already
+             * have been seen during phase 1.
+             */
+            val rememberedGateway =
+                scanner
+                    .takeFallbackCandidate()
+
+
+            scanner
+                .stopScanning()
+
+
+            if (
+                rememberedGateway != null
+            ) {
+
+                Log.d(
+                    TAG,
+                    "No Android relay. Using cached gateway."
+                )
+
+
+                postStatus(
+                    "No Android relay found. Using detected gateway..."
+                )
+
+
+                /*
+                 * Make handleDeviceFound treat it
+                 * as the fallback/gateway phase.
+                 */
+                scanPhase =
+                    ScanPhase.ANY_RESCUEMESH
+
+
+                handleDeviceFound(
+
+                    device =
+                        rememberedGateway.device,
+
+                    rssi =
+                        rememberedGateway.rssi
+                )
+
+
+                return@Runnable
+            }
+
 
             Log.d(
                 TAG,
-                "No Android relay. Falling back to gateway."
+                "No Android relay or cached gateway. Starting fallback scan."
             )
+
 
             postStatus(
                 "No Android relay found. Looking for gateway..."
             )
 
+
             startFallbackScan()
         }
 
+
     /*
-     * Phase 2 timeout.
-     *
-     * Keep packet so Retry still works.
+     * =========================================
+     * FALLBACK TIMEOUT
+     * =========================================
      */
+
     private val fallbackScanTimeoutRunnable =
         Runnable {
 
@@ -226,14 +362,19 @@ class MeshEngine(
                 return@Runnable
             }
 
-            scanner.stopScanning()
+
+            scanner
+                .stopScanning()
+
 
             scanPhase =
                 null
 
+
             postStatus(
                 "No next relay found. Packet kept for retry."
             )
+
 
             Log.d(
                 TAG,
@@ -241,231 +382,407 @@ class MeshEngine(
             )
         }
 
+
+    /*
+     * =========================================
+     * RE-ADVERTISEMENT
+     * =========================================
+     */
+
+    private val readvertiseRunnable =
+        Runnable {
+
+            if (
+                started &&
+                pendingPacket == null &&
+                sendingPacket == null
+            ) {
+
+                Log.d(
+                    TAG,
+                    "Resuming RESCUEMESH advertisement"
+                )
+
+
+                postStatus(
+                    "Relay ready. Listening for emergency packets..."
+                )
+
+
+                advertiser
+                    .startAdvertising()
+            }
+        }
+
+
+    /*
+     * =========================================
+     * START
+     * =========================================
+     */
+
     fun start() {
 
-        if (started) {
+        if (
+            started
+        ) {
+
             return
         }
 
+
         started =
             true
+
 
         postStatus(
             "Starting RESCUEMESH node..."
         )
 
-        gattServer.startServer()
+
+        gattServer
+            .startServer()
     }
+
+
+    /*
+     * =========================================
+     * STOP
+     * =========================================
+     */
 
     fun stop() {
 
         cancelScanTimers()
 
-        scanner.stopScanning()
 
-        advertiser.stopAdvertising()
+        mainHandler.removeCallbacks(
+            readvertiseRunnable
+        )
 
-        gattClient.close()
 
-        gattServer.stopServer()
+        scanner
+            .stopScanning()
+
+
+        advertiser
+            .stopAdvertising()
+
+
+        gattClient
+            .close()
+
+
+        gattServer
+            .stopServer()
+
 
         pendingPacket =
             null
 
+
         sendingPacket =
             null
+
 
         excludedAddress =
             null
 
+
         sendingAddress =
             null
+
 
         scanPhase =
             null
 
+
         started =
             false
+
 
         postStatus(
             "RESCUEMESH stopped"
         )
     }
 
+
     /*
-     * CRITICAL emergency.
-     *
-     * Called by the large red SOS button.
+     * =========================================
+     * CRITICAL SOS
+     * =========================================
      */
+
     fun originateSos(
+
         latitude: Double,
-        longitude: Double
+
+        longitude: Double,
+
+        likelyDisaster: String =
+            RescuePacket.DISASTER_UNKNOWN,
+
+        areaSeverity: String =
+            RescuePacket.SEVERITY_UNKNOWN
+
     ): RescuePacket {
 
+
         val packet =
-            RescuePacket.createCriticalSos(
-                latitude = latitude,
-                longitude = longitude
+            RescuePacket
+                .createCriticalSos(
+
+                    latitude =
+                        latitude,
+
+                    longitude =
+                        longitude,
+
+                    likelyDisaster =
+                        likelyDisaster,
+
+                    areaSeverity =
+                        areaSeverity
+                )
+
+
+        relayManager
+            .markSeen(
+                packet.id
             )
 
-        /*
-         * If the packet eventually loops back,
-         * the origin ignores it.
-         */
-        relayManager.markSeen(
-            packet.id
-        )
 
         Log.d(
             TAG,
             "Created CRITICAL SOS ${packet.id}"
         )
 
+
         postStatus(
             "Critical SOS created. Looking for Android relay first..."
         )
 
+
         beginForward(
-            packet = packet,
-            sourceAddress = null
+
+            packet =
+                packet,
+
+            sourceAddress =
+                null
         )
+
 
         return packet
     }
 
+
     /*
-     * NORMAL help request.
-     *
-     * Called by the form in the middle
-     * of the Home screen.
+     * =========================================
+     * HELP REQUEST
+     * =========================================
      */
+
     fun originateHelpRequest(
+
         latitude: Double,
+
         longitude: Double,
+
         disasterType: String,
+
         peopleCount: String,
+
         explanation: String
+
     ): RescuePacket {
 
+
         val packet =
-            RescuePacket.createHelpRequest(
-                latitude = latitude,
-                longitude = longitude,
-                disasterType = disasterType,
-                peopleCount = peopleCount,
-                explanation = explanation
+            RescuePacket
+                .createHelpRequest(
+
+                    latitude =
+                        latitude,
+
+                    longitude =
+                        longitude,
+
+                    disasterType =
+                        disasterType,
+
+                    peopleCount =
+                        peopleCount,
+
+                    explanation =
+                        explanation
+                )
+
+
+        relayManager
+            .markSeen(
+                packet.id
             )
 
-        /*
-         * Mark our own packet as seen so that
-         * it is ignored if it loops back.
-         */
-        relayManager.markSeen(
-            packet.id
-        )
 
         Log.d(
             TAG,
             "Created NORMAL help request ${packet.id}"
         )
 
+
         postStatus(
             "Help request created. Looking for Android relay first..."
         )
 
-        /*
-         * Uses the exact same proven BLE
-         * forwarding path as critical SOS.
-         */
+
         beginForward(
-            packet = packet,
-            sourceAddress = null
+
+            packet =
+                packet,
+
+            sourceAddress =
+                null
         )
+
 
         return packet
     }
+
+
+    /*
+     * =========================================
+     * RETRY
+     * =========================================
+     */
 
     fun retryPendingForward() {
 
         val packet =
             pendingPacket
 
-        if (packet == null) {
+
+        if (
+            packet == null
+        ) {
 
             postStatus(
                 "No pending packet to retry"
             )
 
+
             return
         }
 
-        gattClient.close()
 
-        scanner.stopScanning()
+        mainHandler.removeCallbacks(
+            readvertiseRunnable
+        )
+
+
+        gattClient
+            .close()
+
+
+        scanner
+            .stopScanning()
+
 
         cancelScanTimers()
+
 
         sendingPacket =
             null
 
+
         sendingAddress =
             null
 
+
         scanPhase =
             null
+
 
         postStatus(
             "Retrying packet ${packet.id.take(8)} at hop ${packet.hopCount}..."
         )
 
+
         startPreferredScan()
     }
+
+
+    /*
+     * =========================================
+     * CANCEL
+     * =========================================
+     */
 
     fun cancelPendingForward() {
 
         cancelScanTimers()
 
-        scanner.stopScanning()
 
-        gattClient.close()
+        mainHandler.removeCallbacks(
+            readvertiseRunnable
+        )
+
+
+        scanner
+            .stopScanning()
+
+
+        gattClient
+            .close()
+
 
         pendingPacket =
             null
 
+
         sendingPacket =
             null
+
 
         excludedAddress =
             null
 
+
         sendingAddress =
             null
+
 
         scanPhase =
             null
 
-        /*
-         * If we stopped advertising while preparing
-         * a forward, make the node visible again.
-         */
-        if (started) {
 
-            advertiser.startAdvertising()
+        if (
+            started
+        ) {
+
+            advertiser
+                .startAdvertising()
         }
+
 
         postStatus(
             "Pending request cancelled"
         )
-
-        Log.d(
-            TAG,
-            "Pending request cancelled"
-        )
     }
 
+
+    /*
+     * =========================================
+     * PACKET RECEIVED
+     * =========================================
+     */
+
     private fun handleIncomingMessage(
+
         sourceDevice: BluetoothDevice,
+
         rawMessage: String
+
     ) {
 
         val sourceAddress =
@@ -473,19 +790,26 @@ class MeshEngine(
                 sourceDevice
             )
 
-        val packet =
-            RescuePacket.fromJson(
-                rawMessage
-            )
 
-        if (packet == null) {
+        val packet =
+            RescuePacket
+                .fromJson(
+                    rawMessage
+                )
+
+
+        if (
+            packet == null
+        ) {
 
             postStatus(
                 "Ignored invalid RESCUEMESH packet"
             )
 
+
             return
         }
+
 
         if (
             packet.type !=
@@ -496,25 +820,31 @@ class MeshEngine(
                 "Ignored unsupported packet type: ${packet.type}"
             )
 
+
             return
         }
 
+
         if (
-            !relayManager.markSeen(
-                packet.id
-            )
+            !relayManager
+                .markSeen(
+                    packet.id
+                )
         ) {
 
             postStatus(
                 "Duplicate SOS ${packet.id.take(8)} ignored"
             )
 
+
             return
         }
+
 
         onPacketReceived(
             packet
         )
+
 
         Log.d(
             TAG,
@@ -524,108 +854,153 @@ class MeshEngine(
                     "source=$sourceAddress"
         )
 
+
         postStatus(
             "Received ${packet.priority} request ${packet.id.take(8)} " +
                     "at hop ${packet.hopCount}"
         )
 
-        if (!packet.canRelay()) {
+
+        if (
+            !packet.canRelay()
+        ) {
 
             postStatus(
                 "TTL reached. Packet will not be forwarded."
             )
 
+
             return
         }
 
-        /*
-         * Increment exactly once.
-         *
-         * Retry does not increment again.
-         */
+
         val nextPacket =
             packet.nextHop()
+
 
         postStatus(
             "Preparing hop ${nextPacket.hopCount}/${nextPacket.ttl}"
         )
 
+
         beginForward(
-            packet = nextPacket,
-            sourceAddress = sourceAddress
+
+            packet =
+                nextPacket,
+
+            sourceAddress =
+                sourceAddress
         )
     }
 
+
+    /*
+     * =========================================
+     * BEGIN FORWARD
+     * =========================================
+     */
+
     private fun beginForward(
+
         packet: RescuePacket,
+
         sourceAddress: String?
+
     ) {
+
+        mainHandler.removeCallbacks(
+            readvertiseRunnable
+        )
+
 
         cancelScanTimers()
 
-        scanner.stopScanning()
+
+        scanner
+            .stopScanning()
+
 
         pendingPacket =
             packet
 
+
         sendingPacket =
             null
+
 
         sendingAddress =
             null
 
+
         excludedAddress =
             sourceAddress
+
 
         scanPhase =
             null
 
+
         Log.d(
             TAG,
             "beginForward packet=${packet.id} " +
-                    "priority=${packet.priority} " +
                     "hop=${packet.hopCount}"
         )
+
 
         startPreferredScan()
     }
 
+
     /*
-     * PHASE 1
-     *
-     * Prefer Android.
+     * =========================================
+     * ANDROID-PREFERRED SCAN
+     * =========================================
      */
+
     private fun startPreferredScan() {
 
         val packet =
             pendingPacket
                 ?: return
 
+
         if (
             sendingPacket != null
         ) {
+
             return
         }
 
+
         cancelScanTimers()
 
-        scanner.stopScanning()
+
+        scanner
+            .stopScanning()
+
 
         scanPhase =
             ScanPhase.ANDROID_PREFERRED
+
 
         postStatus(
             "Looking for nearby Android relay..."
         )
 
-        scanner.startScanning(
-            BleScanner.ScanTarget.ANDROID_ONLY
-        )
+
+        scanner
+            .startScanning(
+                BleScanner.ScanTarget.ANDROID_ONLY
+            )
+
 
         mainHandler.postDelayed(
+
             androidScanTimeoutRunnable,
+
             ANDROID_SCAN_MS
         )
+
 
         Log.d(
             TAG,
@@ -633,42 +1008,57 @@ class MeshEngine(
         )
     }
 
+
     /*
-     * PHASE 2
-     *
-     * Accept Windows gateway.
+     * =========================================
+     * FALLBACK SCAN
+     * =========================================
      */
+
     private fun startFallbackScan() {
 
         val packet =
             pendingPacket
                 ?: return
 
+
         if (
             sendingPacket != null
         ) {
+
             return
         }
 
+
         cancelScanTimers()
 
-        scanner.stopScanning()
+
+        scanner
+            .stopScanning()
+
 
         scanPhase =
             ScanPhase.ANY_RESCUEMESH
+
 
         postStatus(
             "Looking for RESCUEMESH gateway..."
         )
 
-        scanner.startScanning(
-            BleScanner.ScanTarget.ANY_RESCUEMESH
-        )
+
+        scanner
+            .startScanning(
+                BleScanner.ScanTarget.ANY_RESCUEMESH
+            )
+
 
         mainHandler.postDelayed(
+
             fallbackScanTimeoutRunnable,
+
             FALLBACK_SCAN_MS
         )
+
 
         Log.d(
             TAG,
@@ -676,19 +1066,26 @@ class MeshEngine(
         )
     }
 
+
+    /*
+     * =========================================
+     * DEVICE FOUND
+     * =========================================
+     */
+
     private fun handleDeviceFound(
+
         device: BluetoothDevice,
+
         rssi: Int
+
     ) {
 
         val packet =
             pendingPacket
                 ?: return
 
-        /*
-         * Avoid multiple simultaneous connections
-         * from queued scan callbacks.
-         */
+
         if (
             sendingPacket != null
         ) {
@@ -696,10 +1093,12 @@ class MeshEngine(
             return
         }
 
+
         val candidateAddress =
             safeAddress(
                 device
             )
+
 
         Log.d(
             TAG,
@@ -708,11 +1107,10 @@ class MeshEngine(
                     "RSSI=$rssi"
         )
 
+
         /*
-         * Extra safeguard.
-         *
-         * BLE addresses can rotate, so our primary
-         * loop protection is still hiding after send.
+         * Never directly return the packet to
+         * the previous BLE hop.
          */
         if (
             excludedAddress != null &&
@@ -726,56 +1124,83 @@ class MeshEngine(
                 "Ignoring previous hop"
             )
 
+
             return
         }
 
+
         cancelScanTimers()
 
-        scanner.stopScanning()
+
+        scanner
+            .stopScanning()
+
 
         sendingPacket =
             packet
 
+
         sendingAddress =
             candidateAddress
 
+
         val destinationType =
-            when (scanPhase) {
+
+            when (
+                scanPhase
+            ) {
 
                 ScanPhase.ANDROID_PREFERRED ->
+
                     "Android relay"
 
+
                 ScanPhase.ANY_RESCUEMESH ->
+
                     "RESCUEMESH gateway"
 
+
                 null ->
+
                     "RESCUEMESH node"
             }
+
 
         scanPhase =
             null
 
+
         postStatus(
             "$destinationType found. Sending hop ${packet.hopCount}..."
         )
+
 
         Log.d(
             TAG,
             "Sending to $candidateAddress"
         )
 
-        /*
-         * Current hackathon loop prevention.
-         *
-         * Once this node forwards, make it invisible.
-         */
+
         pauseAdvertisingAfterForward()
 
-        gattClient.connectAndSend(
-            device = device,
-            message = packet.toJson()
-        )
+
+        gattClient
+            .connectAndSend(
+
+                device =
+                    device,
+
+                message =
+                    packet.toJson()
+            )
     }
+
+
+    /*
+     * =========================================
+     * SEND SUCCESS
+     * =========================================
+     */
 
     private fun handleSendSuccess() {
 
@@ -783,62 +1208,101 @@ class MeshEngine(
             sendingPacket
                 ?: return
 
+
         val destination =
             sendingAddress
                 ?: "(unknown)"
 
+
         Log.d(
             TAG,
             "SUCCESS packet=${packet.id} " +
-                    "priority=${packet.priority} " +
                     "hop=${packet.hopCount} " +
                     "destination=$destination"
         )
 
-        /*
-         * Packet only disappears after actual
-         * successful characteristic write.
-         */
+
         pendingPacket =
             null
+
 
         sendingPacket =
             null
 
+
         sendingAddress =
             null
+
 
         excludedAddress =
             null
 
+
         scanPhase =
             null
 
+
         cancelScanTimers()
+
 
         onPacketSent(
             packet
         )
 
+
         postStatus(
             "${packet.priority} request ${packet.id.take(8)} " +
                     "sent successfully at hop ${packet.hopCount}"
         )
+
+
+        /*
+         * Become a relay again after this
+         * forwarding operation.
+         */
+        mainHandler.removeCallbacks(
+            readvertiseRunnable
+        )
+
+
+        mainHandler.postDelayed(
+
+            readvertiseRunnable,
+
+            READVERTISE_DELAY_MS
+        )
     }
+
+
+    /*
+     * =========================================
+     * PAUSE ADVERTISING WHILE SENDING
+     * =========================================
+     */
 
     private fun pauseAdvertisingAfterForward() {
 
         Log.d(
             TAG,
-            "Stopping advertisement after forwarding"
+            "Temporarily stopping advertisement while forwarding"
         )
+
 
         postStatus(
-            "Forwarding request. Hiding this node from further relay scans."
+            "Forwarding request. Temporarily hiding this relay."
         )
 
-        advertiser.stopAdvertising()
+
+        advertiser
+            .stopAdvertising()
     }
+
+
+    /*
+     * =========================================
+     * TIMER CLEANUP
+     * =========================================
+     */
 
     private fun cancelScanTimers() {
 
@@ -846,12 +1310,22 @@ class MeshEngine(
             androidScanTimeoutRunnable
         )
 
+
         mainHandler.removeCallbacks(
             fallbackScanTimeoutRunnable
         )
     }
 
-    @SuppressLint("MissingPermission")
+
+    /*
+     * =========================================
+     * ADDRESS
+     * =========================================
+     */
+
+    @SuppressLint(
+        "MissingPermission"
+    )
     private fun safeAddress(
         device: BluetoothDevice
     ): String {
@@ -861,11 +1335,20 @@ class MeshEngine(
             device.address
                 ?: "(unknown)"
 
-        } catch (_: SecurityException) {
+        } catch (
+            _: SecurityException
+        ) {
 
             "(permission denied)"
         }
     }
+
+
+    /*
+     * =========================================
+     * STATUS
+     * =========================================
+     */
 
     private fun postStatus(
         status: String

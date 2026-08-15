@@ -1,27 +1,32 @@
 package com.kernitect.saharaandroid
 
 import android.os.Bundle
+import android.preference.PreferenceManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import com.kernitect.saharaandroid.ble.AppRequirements
+import com.kernitect.saharaandroid.data.local.SaharaDatabase
+import com.kernitect.saharaandroid.disaster.DisasterAlertMatcher
 import com.kernitect.saharaandroid.location.LocationProvider
-import com.kernitect.saharaandroid.mesh.MeshEngine
+import com.kernitect.saharaandroid.model.ReceivedAlert
+import com.kernitect.saharaandroid.model.RescuePacket
+import com.kernitect.saharaandroid.service.MeshServiceState
+import com.kernitect.saharaandroid.service.RescueMeshService
 import com.kernitect.saharaandroid.ui.SaharaApp
 import com.kernitect.saharaandroid.ui.components.SendProgressDialog
 import com.kernitect.saharaandroid.ui.components.SendProgressState
 import com.kernitect.saharaandroid.ui.theme.SaharaAndroidTheme
 import kotlinx.coroutines.delay
-import androidx.compose.runtime.mutableStateListOf
-import com.kernitect.saharaandroid.model.ReceivedAlert
-import android.preference.PreferenceManager
+import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
 
 class MainActivity : ComponentActivity() {
@@ -29,93 +34,259 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(
         savedInstanceState: Bundle?
     ) {
-        super.onCreate(savedInstanceState)
 
-        Configuration.getInstance().load(
-            applicationContext,
-            PreferenceManager.getDefaultSharedPreferences(
-                applicationContext
-            )
+        super.onCreate(
+            savedInstanceState
         )
 
-        Configuration.getInstance().userAgentValue =
+
+        /*
+         * =============================
+         * OSM CONFIGURATION
+         * =============================
+         */
+        Configuration
+            .getInstance()
+            .load(
+                applicationContext,
+
+                PreferenceManager
+                    .getDefaultSharedPreferences(
+                        applicationContext
+                    )
+            )
+
+
+        Configuration
+            .getInstance()
+            .userAgentValue =
             packageName
+
 
         setContent {
 
             SaharaAndroidTheme {
 
-                var status by remember {
-                    mutableStateOf("Starting...")
+
+                /*
+                 * =============================
+                 * ROOM
+                 * =============================
+                 */
+
+                val database =
+                    remember {
+
+                        SaharaDatabase
+                            .getInstance(
+                                applicationContext
+                            )
+                    }
+
+
+                val incidentDao =
+                    remember(
+                        database
+                    ) {
+
+                        database.incidentDao()
+                    }
+
+
+                val publicAlertDao =
+                    remember(
+                        database
+                    ) {
+
+                        database.publicAlertDao()
+                    }
+
+
+                val coroutineScope =
+                    rememberCoroutineScope()
+
+
+                /*
+                 * =============================
+                 * STORED INCIDENTS
+                 * =============================
+                 */
+
+                val storedIncidents by
+                incidentDao
+                    .observeAllIncidents()
+                    .collectAsState(
+                        initial =
+                            emptyList()
+                    )
+
+
+                val unreadNotificationCount by
+                incidentDao
+                    .observeUnreadCount()
+                    .collectAsState(
+                        initial =
+                            0
+                    )
+
+
+                val receivedAlerts =
+
+                    remember(
+                        storedIncidents
+                    ) {
+
+                        storedIncidents
+                            .mapNotNull {
+                                    incident ->
+
+
+                                val packet =
+                                    RescuePacket
+                                        .fromJson(
+                                            incident.packetJson
+                                        )
+
+
+                                if (
+                                    packet != null
+                                ) {
+
+                                    ReceivedAlert(
+
+                                        packet =
+                                            packet,
+
+                                        receivedAt =
+                                            incident.receivedAt
+                                    )
+
+                                } else {
+
+                                    null
+                                }
+                            }
+                    }
+
+
+                /*
+                 * =============================
+                 * PUBLIC ALERTS
+                 * =============================
+                 */
+
+                val storedPublicAlerts by
+                publicAlertDao
+                    .observeAllAlerts()
+                    .collectAsState(
+                        initial =
+                            emptyList()
+                    )
+
+
+                var publicAlertLatitude by remember {
+
+                    mutableStateOf<Double?>(
+                        null
+                    )
                 }
+
+
+                var publicAlertLongitude by remember {
+
+                    mutableStateOf<Double?>(
+                        null
+                    )
+                }
+
+
+                /*
+                 * =============================
+                 * UI STATE
+                 * =============================
+                 */
+
+                var status by remember {
+
+                    mutableStateOf(
+                        "Starting..."
+                    )
+                }
+
 
                 var gettingLocation by remember {
-                    mutableStateOf(false)
+
+                    mutableStateOf(
+                        false
+                    )
                 }
 
-                /*
-                 * All SOS/help packets this phone
-                 * has received from another mesh node.
-                 */
-                val receivedAlerts =
-                    remember {
-                        mutableStateListOf<ReceivedAlert>()
-                    }
-
-                /*
-                 * IDs that haven't been viewed
-                 * through the bell screen yet.
-                 */
-                val unreadAlertIds =
-                    remember {
-                        mutableStateListOf<String>()
-                    }
 
                 var activeIncomingAlert by remember {
+
                     mutableStateOf<ReceivedAlert?>(
                         null
                     )
                 }
 
-                /*
-                 * Progress popup state.
-                 */
+
                 var sendDialogVisible by remember {
-                    mutableStateOf(false)
+
+                    mutableStateOf(
+                        false
+                    )
                 }
 
+
                 var sendProgressState by remember {
+
                     mutableStateOf(
                         SendProgressState.LOCATING
                     )
                 }
 
+
                 var sendProgressMessage by remember {
-                    mutableStateOf("")
+
+                    mutableStateOf(
+                        ""
+                    )
                 }
+
 
                 var activeRequestIsCritical by remember {
-                    mutableStateOf(true)
+
+                    mutableStateOf(
+                        true
+                    )
                 }
 
-                /*
-                 * Every new request gets a generation number.
-                 *
-                 * Cancelling increments this number so an old
-                 * GPS callback cannot accidentally send later.
-                 */
+
                 var requestGeneration by remember {
-                    mutableStateOf(0)
+
+                    mutableStateOf(
+                        0
+                    )
                 }
+
 
                 var permissionsGranted by remember {
+
                     mutableStateOf(
+
                         AppRequirements
                             .hasAllRuntimePermissions(
                                 this@MainActivity
                             )
                     )
                 }
+
+
+                /*
+                 * =============================
+                 * LOCATION
+                 * =============================
+                 */
 
                 val locationProvider =
                     remember {
@@ -126,211 +297,238 @@ class MainActivity : ComponentActivity() {
                         )
                     }
 
-                val meshEngine =
-                    remember {
 
-                        MeshEngine(
-                            context =
-                                this@MainActivity,
+                /*
+                 * =============================
+                 * BACKGROUND SERVICE STATUS
+                 * =============================
+                 */
 
-                            onStatusChanged = {
-                                    newStatus ->
+                val meshServiceStatus by
+                MeshServiceState
+                    .status
+                    .collectAsState()
 
-                                status =
-                                    newStatus
 
-                                /*
-                                 * Convert technical mesh status
-                                 * into simple user-facing progress.
-                                 */
-                                if (sendDialogVisible) {
+                /*
+                 * Convert service status into
+                 * existing send-progress UI.
+                 */
+                LaunchedEffect(
+                    meshServiceStatus
+                ) {
 
-                                    when {
+                    status =
+                        meshServiceStatus
 
-                                        newStatus.contains(
-                                            "Looking for nearby Android relay",
-                                            ignoreCase = true
-                                        ) -> {
 
-                                            sendProgressState =
-                                                SendProgressState.SEARCHING
+                    if (
+                        sendDialogVisible
+                    ) {
 
-                                            sendProgressMessage =
-                                                "Finding a nearby rescue mesh device..."
-                                        }
+                        when {
 
-                                        newStatus.contains(
-                                            "Looking for RESCUEMESH gateway",
-                                            ignoreCase = true
-                                        ) -> {
+                            meshServiceStatus.contains(
+                                "Looking for nearby Android relay",
+                                ignoreCase = true
+                            ) -> {
 
-                                            sendProgressState =
-                                                SendProgressState.SEARCHING
+                                sendProgressState =
+                                    SendProgressState.SEARCHING
 
-                                            sendProgressMessage =
-                                                "Looking for a gateway..."
-                                        }
-
-                                        newStatus.contains(
-                                            "found. Sending hop",
-                                            ignoreCase = true
-                                        ) -> {
-
-                                            /*
-                                             * From here cancellation is hidden.
-                                             */
-                                            sendProgressState =
-                                                SendProgressState.SENDING
-
-                                            sendProgressMessage =
-                                                if (activeRequestIsCritical) {
-                                                    "Sending critical SOS..."
-                                                } else {
-                                                    "Sending help request..."
-                                                }
-                                        }
-
-                                        newStatus.contains(
-                                            "No next relay found",
-                                            ignoreCase = true
-                                        ) -> {
-
-                                            sendProgressState =
-                                                SendProgressState.ERROR
-
-                                            sendProgressMessage =
-                                                "No nearby relay or gateway was found."
-                                        }
-                                    }
-                                }
-                            },
-
-                            onPacketReceived = {
-                                    packet ->
-
-                                status =
-                                    "${packet.priority} request received - " +
-                                            "Hop ${packet.hopCount}/${packet.ttl}"
-
-                                val alert =
-                                    ReceivedAlert(
-                                        packet = packet
-                                    )
-
-                                /*
-                                 * Permanent in-app notification list.
-                                 */
-                                receivedAlerts.add(
-                                    index = 0,
-                                    element = alert
-                                )
-
-                                /*
-                                 * Unread bell counter.
-                                 */
-                                if (
-                                    !unreadAlertIds.contains(
-                                        packet.id
-                                    )
-                                ) {
-                                    unreadAlertIds.add(
-                                        packet.id
-                                    )
-                                }
-
-                                /*
-                                 * Temporary heads-up banner.
-                                 */
-                                activeIncomingAlert =
-                                    alert
-                            },
-
-                            onPacketSent = {
-                                    packet ->
-
-                                status =
-                                    "${packet.priority} request sent - " +
-                                            "Hop ${packet.hopCount}/${packet.ttl}"
-
-                                if (sendDialogVisible) {
-
-                                    sendProgressState =
-                                        SendProgressState.SUCCESS
-
-                                    sendProgressMessage =
-                                        if (packet.priority ==
-                                            "CRITICAL"
-                                        ) {
-                                            "SOS sent successfully."
-                                        } else {
-                                            "Help request sent successfully."
-                                        }
-                                }
+                                sendProgressMessage =
+                                    "Finding a nearby rescue mesh device..."
                             }
-                        )
+
+
+                            meshServiceStatus.contains(
+                                "Looking for RESCUEMESH gateway",
+                                ignoreCase = true
+                            ) -> {
+
+                                sendProgressState =
+                                    SendProgressState.SEARCHING
+
+                                sendProgressMessage =
+                                    "Looking for a gateway..."
+                            }
+
+
+                            meshServiceStatus.contains(
+                                "found. Sending hop",
+                                ignoreCase = true
+                            ) -> {
+
+                                sendProgressState =
+                                    SendProgressState.SENDING
+
+
+                                sendProgressMessage =
+
+                                    if (
+                                        activeRequestIsCritical
+                                    ) {
+
+                                        "Sending critical SOS..."
+
+                                    } else {
+
+                                        "Sending help request..."
+                                    }
+                            }
+
+
+                            meshServiceStatus.contains(
+                                "No next relay found",
+                                ignoreCase = true
+                            ) -> {
+
+                                sendProgressState =
+                                    SendProgressState.ERROR
+
+                                sendProgressMessage =
+                                    "No nearby relay or gateway was found."
+                            }
+                        }
                     }
+                }
+
+
+                /*
+                 * =================================
+                 * IN-APP HEADS-UP ALERT
+                 * =================================
+                 *
+                 * System notifications are handled
+                 * directly by RescueMeshService.
+                 */
+                LaunchedEffect(
+                    Unit
+                ) {
+
+                    MeshServiceState
+                        .incomingAlerts
+                        .collect {
+                                alert ->
+
+                            activeIncomingAlert =
+                                alert
+                        }
+                }
+
+
+                /*
+                 * =================================
+                 * SEND SUCCESS
+                 * =================================
+                 */
+                LaunchedEffect(
+                    Unit
+                ) {
+
+                    MeshServiceState
+                        .sentPackets
+                        .collect {
+                                packet ->
+
+
+                            status =
+                                "${packet.priority} request sent - " +
+                                        "Hop ${packet.hopCount}/${packet.ttl}"
+
+
+                            if (
+                                sendDialogVisible
+                            ) {
+
+                                sendProgressState =
+                                    SendProgressState.SUCCESS
+
+
+                                sendProgressMessage =
+
+                                    if (
+                                        packet.priority ==
+                                        RescuePacket.PRIORITY_CRITICAL
+                                    ) {
+
+                                        "SOS sent successfully."
+
+                                    } else {
+
+                                        "Help request sent successfully."
+                                    }
+                            }
+                        }
+                }
+
+
+                /*
+                 * =============================
+                 * PERMISSIONS
+                 * =============================
+                 */
 
                 val permissionLauncher =
                     rememberLauncherForActivityResult(
+
                         contract =
                             ActivityResultContracts
                                 .RequestMultiplePermissions()
+
                     ) {
 
                         permissionsGranted =
+
                             AppRequirements
                                 .hasAllRuntimePermissions(
                                     this@MainActivity
                                 )
                     }
 
-                /*
-                 * Permissions.
-                 */
-                LaunchedEffect(Unit) {
 
-                    if (!permissionsGranted) {
+                LaunchedEffect(
+                    Unit
+                ) {
+
+                    if (
+                        !permissionsGranted ||
+                        !AppRequirements
+                            .hasNotificationPermission(
+                                this@MainActivity
+                            )
+                    ) {
 
                         permissionLauncher.launch(
+
                             AppRequirements
                                 .requiredRuntimePermissions()
                         )
                     }
                 }
 
+
                 /*
-                 * Start mesh.
+                 * =============================
+                 * START BACKGROUND RESCUEMESH
+                 * =============================
+                 *
+                 * IMPORTANT:
+                 *
+                 * We DO NOT stop this when the
+                 * Activity leaves the screen.
                  */
                 LaunchedEffect(
                     permissionsGranted
                 ) {
 
-                    if (permissionsGranted) {
+                    if (
+                        permissionsGranted
+                    ) {
 
-                        if (
-                            !AppRequirements
-                                .hasPreciseLocation(
-                                    this@MainActivity
-                                )
-                        ) {
-
-                            status =
-                                "Precise location permission required"
-
-                        } else if (
-                            !AppRequirements
-                                .isLocationServicesEnabled(
-                                    this@MainActivity
-                                )
-                        ) {
-
-                            status =
-                                "Turn on Location services"
-
-                        } else {
-
-                            meshEngine.start()
-                        }
+                        RescueMeshService.start(
+                            this@MainActivity
+                        )
 
                     } else {
 
@@ -339,8 +537,103 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+
                 /*
-                 * Briefly show success, then close automatically.
+                 * =============================
+                 * LOCAL PUBLIC ALERT GPS
+                 * =============================
+                 */
+
+                LaunchedEffect(
+                    permissionsGranted,
+                    storedPublicAlerts.isNotEmpty()
+                ) {
+
+                    if (
+                        permissionsGranted &&
+                        storedPublicAlerts.isNotEmpty() &&
+                        AppRequirements
+                            .hasPreciseLocation(
+                                this@MainActivity
+                            ) &&
+                        AppRequirements
+                            .isLocationServicesEnabled(
+                                this@MainActivity
+                            )
+                    ) {
+
+                        locationProvider
+                            .getCurrentLocation(
+
+                                onSuccess = {
+                                        location ->
+
+
+                                    publicAlertLatitude =
+                                        location.latitude
+
+
+                                    publicAlertLongitude =
+                                        location.longitude
+                                },
+
+
+                                onError = {
+
+                                    /*
+                                     * Home simply shows
+                                     * no matching alert.
+                                     */
+                                }
+                            )
+                    }
+                }
+
+
+                val alertLatitude =
+                    publicAlertLatitude
+
+
+                val alertLongitude =
+                    publicAlertLongitude
+
+
+                val matchedPublicAlert =
+
+                    remember(
+                        storedPublicAlerts,
+                        alertLatitude,
+                        alertLongitude
+                    ) {
+
+                        if (
+                            alertLatitude != null &&
+                            alertLongitude != null
+                        ) {
+
+                            DisasterAlertMatcher
+                                .findPrimaryAlert(
+
+                                    latitude =
+                                        alertLatitude,
+
+                                    longitude =
+                                        alertLongitude,
+
+                                    alerts =
+                                        storedPublicAlerts
+                                )
+                                ?.alert
+
+                        } else {
+
+                            null
+                        }
+                    }
+
+
+                /*
+                 * Brief success dialog.
                  */
                 LaunchedEffect(
                     sendProgressState,
@@ -357,39 +650,53 @@ class MainActivity : ComponentActivity() {
                             1500
                         )
 
+
                         sendDialogVisible =
                             false
                     }
                 }
 
-                DisposableEffect(Unit) {
 
-                    onDispose {
-
-                        meshEngine.stop()
-                    }
-                }
+                /*
+                 * =============================
+                 * UI
+                 * =============================
+                 */
 
                 SaharaApp(
+
+                    publicAlert =
+                        matchedPublicAlert,
+
 
                     receivedAlerts =
                         receivedAlerts,
 
+
                     unreadNotificationCount =
-                        unreadAlertIds.size,
+                        unreadNotificationCount,
+
 
                     incomingAlert =
                         activeIncomingAlert,
 
+
                     onIncomingAlertDismissed = {
+
                         activeIncomingAlert =
                             null
                     },
 
+
                     onNotificationsOpened = {
 
-                        unreadAlertIds.clear()
+                        coroutineScope.launch {
+
+                            incidentDao
+                                .markAllAsRead()
+                        }
                     },
+
 
                     /*
                      * =============================
@@ -403,7 +710,9 @@ class MainActivity : ComponentActivity() {
                             !gettingLocation
                         ) {
 
-                            if (!permissionsGranted) {
+                            if (
+                                !permissionsGranted
+                            ) {
 
                                 status =
                                     "Required permissions not granted"
@@ -430,28 +739,33 @@ class MainActivity : ComponentActivity() {
 
                             } else {
 
-                                /*
-                                 * Start a new request generation.
-                                 */
-                                requestGeneration += 1
+                                requestGeneration +=
+                                    1
+
 
                                 val thisRequest =
                                     requestGeneration
 
+
                                 activeRequestIsCritical =
                                     true
+
 
                                 gettingLocation =
                                     true
 
+
                                 sendDialogVisible =
                                     true
+
 
                                 sendProgressState =
                                     SendProgressState.LOCATING
 
+
                                 sendProgressMessage =
                                     "Getting your location..."
+
 
                                 locationProvider
                                     .getCurrentLocation(
@@ -459,10 +773,7 @@ class MainActivity : ComponentActivity() {
                                         onSuccess = {
                                                 location ->
 
-                                            /*
-                                             * Ignore this result if
-                                             * the user cancelled.
-                                             */
+
                                             if (
                                                 thisRequest ==
                                                 requestGeneration
@@ -470,26 +781,76 @@ class MainActivity : ComponentActivity() {
 
                                                 gettingLocation =
                                                     false
+
 
                                                 sendProgressState =
                                                     SendProgressState.SEARCHING
 
+
                                                 sendProgressMessage =
                                                     "Finding a nearby rescue mesh device..."
 
-                                                meshEngine
-                                                    .originateSos(
+
+                                                publicAlertLatitude =
+                                                    location.latitude
+
+
+                                                publicAlertLongitude =
+                                                    location.longitude
+
+
+                                                val matchedAlert =
+
+                                                    DisasterAlertMatcher
+                                                        .findPrimaryAlert(
+
+                                                            latitude =
+                                                                location.latitude,
+
+                                                            longitude =
+                                                                location.longitude,
+
+                                                            alerts =
+                                                                storedPublicAlerts
+                                                        )
+                                                        ?.alert
+
+
+                                                /*
+                                                 * Send command to SERVICE.
+                                                 *
+                                                 * MainActivity no longer owns
+                                                 * MeshEngine.
+                                                 */
+                                                RescueMeshService
+                                                    .sendCriticalSos(
+
+                                                        context =
+                                                            this@MainActivity,
+
                                                         latitude =
                                                             location.latitude,
 
                                                         longitude =
-                                                            location.longitude
+                                                            location.longitude,
+
+                                                        likelyDisaster =
+                                                            matchedAlert
+                                                                ?.disasterType
+                                                                ?: RescuePacket.DISASTER_UNKNOWN,
+
+                                                        areaSeverity =
+                                                            matchedAlert
+                                                                ?.severity
+                                                                ?: RescuePacket.SEVERITY_UNKNOWN
                                                     )
                                             }
                                         },
 
+
                                         onError = {
                                                 error ->
+
 
                                             if (
                                                 thisRequest ==
@@ -499,8 +860,10 @@ class MainActivity : ComponentActivity() {
                                                 gettingLocation =
                                                     false
 
+
                                                 sendProgressState =
                                                     SendProgressState.ERROR
+
 
                                                 sendProgressMessage =
                                                     error
@@ -510,6 +873,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     },
+
 
                     /*
                      * =============================
@@ -521,12 +885,15 @@ class MainActivity : ComponentActivity() {
                             peopleCount,
                             explanation ->
 
+
                         if (
                             !sendDialogVisible &&
                             !gettingLocation
                         ) {
 
-                            if (!permissionsGranted) {
+                            if (
+                                !permissionsGranted
+                            ) {
 
                                 status =
                                     "Required permissions not granted"
@@ -553,31 +920,40 @@ class MainActivity : ComponentActivity() {
 
                             } else {
 
-                                requestGeneration += 1
+                                requestGeneration +=
+                                    1
+
 
                                 val thisRequest =
                                     requestGeneration
 
+
                                 activeRequestIsCritical =
                                     false
+
 
                                 gettingLocation =
                                     true
 
+
                                 sendDialogVisible =
                                     true
+
 
                                 sendProgressState =
                                     SendProgressState.LOCATING
 
+
                                 sendProgressMessage =
                                     "Getting your location..."
+
 
                                 locationProvider
                                     .getCurrentLocation(
 
                                         onSuccess = {
                                                 location ->
+
 
                                             if (
                                                 thisRequest ==
@@ -587,14 +963,21 @@ class MainActivity : ComponentActivity() {
                                                 gettingLocation =
                                                     false
 
+
                                                 sendProgressState =
                                                     SendProgressState.SEARCHING
+
 
                                                 sendProgressMessage =
                                                     "Finding a nearby rescue mesh device..."
 
-                                                meshEngine
-                                                    .originateHelpRequest(
+
+                                                RescueMeshService
+                                                    .sendHelpRequest(
+
+                                                        context =
+                                                            this@MainActivity,
+
                                                         latitude =
                                                             location.latitude,
 
@@ -613,8 +996,10 @@ class MainActivity : ComponentActivity() {
                                             }
                                         },
 
+
                                         onError = {
                                                 error ->
+
 
                                             if (
                                                 thisRequest ==
@@ -624,8 +1009,10 @@ class MainActivity : ComponentActivity() {
                                                 gettingLocation =
                                                     false
 
+
                                                 sendProgressState =
                                                     SendProgressState.ERROR
+
 
                                                 sendProgressMessage =
                                                     error
@@ -637,49 +1024,65 @@ class MainActivity : ComponentActivity() {
                     }
                 )
 
+
                 /*
-                 * Progress popup sits above the entire app.
+                 * =============================
+                 * SEND DIALOG
+                 * =============================
                  */
-                if (sendDialogVisible) {
+
+                if (
+                    sendDialogVisible
+                ) {
 
                     SendProgressDialog(
+
                         title =
-                            if (activeRequestIsCritical) {
+
+                            if (
+                                activeRequestIsCritical
+                            ) {
+
                                 "Emergency SOS"
+
                             } else {
+
                                 "Help Request"
                             },
+
 
                         message =
                             sendProgressMessage,
 
+
                         state =
                             sendProgressState,
 
+
                         onCancel = {
 
-                            /*
-                             * Invalidate any unfinished
-                             * GPS callback.
-                             */
-                            requestGeneration += 1
+                            requestGeneration +=
+                                1
+
 
                             gettingLocation =
                                 false
 
-                            /*
-                             * Stop scanning / drop the
-                             * pending mesh packet.
-                             */
-                            meshEngine
-                                .cancelPendingForward()
+
+                            RescueMeshService
+                                .cancelPending(
+                                    this@MainActivity
+                                )
+
 
                             status =
                                 "Request cancelled"
 
+
                             sendDialogVisible =
                                 false
                         },
+
 
                         onClose = {
 
