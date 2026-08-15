@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   getSosList,
@@ -33,8 +33,7 @@ function App() {
     notifications: "Notifications",
   };
 
-  useEffect(() => {
-    async function loadSos() {
+  const loadSos = useCallback(async () => {
       try {
         const [sosData, statsData] = await Promise.all([
           getSosList(),
@@ -52,10 +51,22 @@ function App() {
       } finally {
         setLoading(false);
       }
-    }
-
-    loadSos();
   }, []);
+
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => {
+      void loadSos();
+    }, 0);
+
+    const timer = window.setInterval(() => {
+      void loadSos();
+    }, 20_000);
+
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.clearInterval(timer);
+    };
+  }, [loadSos]);
 
   const renderPage = () => {
     if (loading) {
@@ -84,7 +95,7 @@ function App() {
 
     switch (activePage) {
       case "map":
-        return <MapPage />;
+        return <MapPage sosItems={sosItems} />;
 
       case "teams":
         return (
@@ -125,6 +136,7 @@ function App() {
 
         <Topbar
           title={pageTitles[activePage] ?? "Dashboard"}
+          onRefresh={() => void loadSos()}
         />
 
         <main className="flex-1 overflow-auto p-6 lg:p-8">

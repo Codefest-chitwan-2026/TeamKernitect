@@ -6,15 +6,18 @@ from app.database import (
     close_database,
     ensure_indexes,
     ping_database,
+    seed_rescue_teams,
 )
 
 from app.routes.sos import router as sos_router
+from app.routes.responders import router as responders_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await ping_database()
     await ensure_indexes()
+    await seed_rescue_teams()
 
     print("MongoDB Atlas connection successful.")
 
@@ -48,6 +51,7 @@ app.include_router(
     sos_router,
     prefix="/api"
 )
+app.include_router(responders_router, prefix="/api")
 
 
 @app.get("/")

@@ -1,80 +1,28 @@
+import { useEffect, useState } from "react";
 import TeamTable from "../components/TeamTable";
+import { approveResponder, getRescueTeams, getResponders, rejectResponder, type ResponderRegistration, type RescueTeam } from "../services/api";
 
-interface TeamManagementProps {
-  onAssign: () => void;
-}
+export default function TeamManagement({ onAssign }: { onAssign: () => void }) {
+  const [teams, setTeams] = useState<RescueTeam[]>([]); const [responders, setResponders] = useState<ResponderRegistration[]>([]);
+  const [selected, setSelected] = useState<Record<string, string>>({}); const [error, setError] = useState<string | null>(null); const [loading, setLoading] = useState(true);
+  const load = async () => { setLoading(true); setError(null); try { const [teamData, responderData] = await Promise.all([getRescueTeams(), getResponders()]); setTeams(teamData.items); setResponders(responderData.items); } catch (value) { setError(value instanceof Error ? value.message : "Unable to load responder management"); } finally { setLoading(false); } };
+  useEffect(() => {
+  const initialLoad = window.setTimeout(() => {
+    void load();
+  }, 0);
 
-export default function TeamManagement({
-  onAssign,
-}: TeamManagementProps) {
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">
-            Team Management
-          </h2>
-
-          <p className="mt-1 text-sm text-gray-500">
-            Manage rescue teams and their current assignments.
-          </p>
-        </div>
-
-        <button
-          onClick={onAssign}
-          className="rounded-lg bg-red-500 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-red-200 transition hover:bg-red-600"
-        >
-          + Assign Team
-        </button>
-      </div>
-
-      {/* Search */}
-      <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-3 md:flex-row">
-          <input
-            type="text"
-            placeholder="Search rescue team..."
-            className="h-10 flex-1 rounded-lg border border-gray-200 px-4 text-sm outline-none transition placeholder:text-gray-400 focus:border-red-400 focus:ring-2 focus:ring-red-100"
-          />
-
-          <select className="h-10 rounded-lg border border-gray-200 bg-white px-4 text-sm text-gray-600 outline-none focus:border-red-400">
-            <option>All Status</option>
-            <option>Available</option>
-            <option>On Mission</option>
-            <option>Offline</option>
-          </select>
-
-          <button className="h-10 rounded-lg bg-gray-900 px-5 text-sm font-medium text-white hover:bg-gray-800">
-            Search
-          </button>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <p className="text-xs text-gray-500">Total Teams</p>
-          <p className="mt-1 text-2xl font-bold">08</p>
-        </div>
-
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <p className="text-xs text-gray-500">Available</p>
-          <p className="mt-1 text-2xl font-bold text-green-600">05</p>
-        </div>
-
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <p className="text-xs text-gray-500">On Mission</p>
-          <p className="mt-1 text-2xl font-bold text-blue-600">03</p>
-        </div>
-
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <p className="text-xs text-gray-500">Offline</p>
-          <p className="mt-1 text-2xl font-bold text-gray-400">02</p>
-        </div>
-      </div>
-
-      <TeamTable />
-    </div>
-  );
+  return () => {
+    window.clearTimeout(initialLoad);
+  };
+}, []);
+  const approve = async (responder: ResponderRegistration) => { const teamId = selected[responder.responderId]; if (!teamId) return; try { await approveResponder(responder.responderId, teamId); await load(); } catch (value) { setError(value instanceof Error ? value.message : "Approval failed"); } };
+  const reject = async (responder: ResponderRegistration) => { try { await rejectResponder(responder.responderId); await load(); } catch (value) { setError(value instanceof Error ? value.message : "Rejection failed"); } };
+  const pending = responders.filter(item => item.status === "PENDING");
+  return <div className="space-y-6"><div className="flex flex-col justify-between gap-4 md:flex-row md:items-end"><div><h2 className="text-2xl font-bold">Team Management</h2><p className="mt-1 text-sm text-gray-500">Official teams and responder installation approvals.</p></div><button onClick={onAssign} className="rounded-lg bg-red-500 px-5 py-2.5 text-sm font-semibold text-white">+ Assign Team</button></div>
+    {error && <div className="rounded-xl bg-red-50 p-4 text-sm text-red-700">{error}</div>}{loading ? <p className="text-sm text-gray-500">Loading teams and responders…</p> : <>
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">{[["Official Teams", teams.length], ["Pending", pending.length], ["Approved", responders.filter(i => i.status === "APPROVED").length], ["Rejected", responders.filter(i => i.status === "REJECTED").length]].map(([label, value]) => <div key={label} className="rounded-xl border border-gray-200 bg-white p-4"><p className="text-xs text-gray-500">{label}</p><p className="mt-1 text-2xl font-bold">{value}</p></div>)}</div>
+      <TeamTable teams={teams} />
+      <section className="rounded-xl border border-gray-200 bg-white shadow-sm"><div className="border-b border-gray-100 px-5 py-4"><h3 className="font-semibold">Pending Responder Approvals</h3></div>{pending.length === 0 ? <p className="p-5 text-sm text-gray-500">No pending responder registrations.</p> : pending.map(item => <div key={item.responderId} className="grid gap-3 border-b border-gray-100 p-5 lg:grid-cols-[1fr_1fr_auto]"><div><p className="font-semibold">{item.operatorName}</p><p className="text-xs text-gray-500">{item.organization} • {item.district}</p><p className="text-xs text-gray-400">{item.responderId} • {item.deviceId}</p></div><select value={selected[item.responderId] || ""} onChange={event => setSelected(current => ({ ...current, [item.responderId]: event.target.value }))} className="rounded-lg border border-gray-200 px-3 text-sm"><option value="">Assign official team…</option>{teams.map(team => <option key={team.teamId} value={team.teamId}>{team.teamName} — {team.callsign}</option>)}</select><div className="flex gap-2"><button onClick={() => void approve(item)} disabled={!selected[item.responderId]} className="rounded-lg bg-red-500 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">Approve</button><button onClick={() => void reject(item)} className="rounded-lg border px-4 py-2 text-xs font-semibold">Reject</button></div></div>)}</section>
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{responders.filter(i => i.status !== "PENDING").map(item => <article key={item.responderId} className="rounded-xl border border-gray-200 bg-white p-4"><span className="text-xs font-semibold text-gray-500">{item.status}</span><h3 className="mt-1 font-semibold">{item.operatorName}</h3><p className="text-sm text-gray-500">{item.teamName || "No team assigned"} {item.callsign ? `• ${item.callsign}` : ""}</p><p className="mt-2 text-xs text-gray-400">{item.district} • {item.deviceId}</p></article>)}</section>
+    </>}</div>;
 }
