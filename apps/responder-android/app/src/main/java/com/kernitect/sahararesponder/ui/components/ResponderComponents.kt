@@ -72,7 +72,11 @@ fun TeamIdentityCard(profile: ResponderTeamProfile) {
                 Text(profile.teamName, fontWeight = FontWeight.Bold)
                 Text("${profile.callsign} • ${profile.district}", color = CriticalRed, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
             }
-            Text("OFFLINE READY", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+            Column(horizontalAlignment = Alignment.End) {
+                Text("VERIFIED RESPONDER", style = MaterialTheme.typography.labelSmall, color = Color(0xFF168A48), fontWeight = FontWeight.Bold)
+                Text(profile.responderId, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(profile.deviceId.take(18) + if (profile.deviceId.length > 18) "…" else "", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }

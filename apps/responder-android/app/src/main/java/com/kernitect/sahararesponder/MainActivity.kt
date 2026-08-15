@@ -30,7 +30,10 @@ import com.kernitect.sahararesponder.model.RescuePacket
 import com.kernitect.sahararesponder.model.ResponderIncident
 import com.kernitect.sahararesponder.model.RescueAckPacket
 import com.kernitect.sahararesponder.model.ResponderTeamProfile
+import com.kernitect.sahararesponder.model.ResponderRegistration
+import com.kernitect.sahararesponder.model.ResponderRegistrationStatus
 import com.kernitect.sahararesponder.identity.ResponderIdentityStore
+import com.kernitect.sahararesponder.network.ResponderApiClient
 import com.kernitect.sahararesponder.mesh.AckRecord
 import com.kernitect.sahararesponder.mesh.AckSendState
 import com.kernitect.sahararesponder.mesh.ResponderMeshSender
@@ -42,7 +45,9 @@ import com.kernitect.sahararesponder.ui.screens.active.ActiveRescuesScreen
 import com.kernitect.sahararesponder.ui.screens.home.ResponderHomeScreen
 import com.kernitect.sahararesponder.ui.screens.incident.IncidentDetailsScreen
 import com.kernitect.sahararesponder.ui.screens.map.ResponderMapScreen
-import com.kernitect.sahararesponder.ui.screens.setup.ResponderSetupScreen
+import com.kernitect.sahararesponder.ui.screens.setup.PendingApprovalScreen
+import com.kernitect.sahararesponder.ui.screens.setup.RejectedRegistrationScreen
+import com.kernitect.sahararesponder.ui.screens.setup.ResponderRegistrationScreen
 import com.kernitect.sahararesponder.ui.theme.SaharaResponderTheme
 import org.osmdroid.config.Configuration
 
@@ -57,11 +62,15 @@ class MainActivity : ComponentActivity() {
     private var locationStatus by mutableStateOf("Responder location permission required")
     private var teamProfile by mutableStateOf<ResponderTeamProfile?>(null)
     private var identityError by mutableStateOf<String?>(null)
+    private var registration by mutableStateOf<ResponderRegistration?>(null)
+    private var registrationLoading by mutableStateOf(false)
+    private var registrationError by mutableStateOf<String?>(null)
     private lateinit var bleServer: ResponderBleServer
     private lateinit var bleAdvertiser: ResponderBleAdvertiser
     private lateinit var locationProvider: ResponderLocationProvider
     private lateinit var meshSender: ResponderMeshSender
     private lateinit var identityStore: ResponderIdentityStore
+    private val responderApiClient = ResponderApiClient()
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
         if (hasRequiredPermissions()) startReceiverIfReady() else {
@@ -84,7 +93,9 @@ class MainActivity : ComponentActivity() {
         Configuration.getInstance().load(applicationContext, PreferenceManager.getDefaultSharedPreferences(applicationContext))
         Configuration.getInstance().userAgentValue = packageName
         identityStore = ResponderIdentityStore(applicationContext)
-        teamProfile = identityStore.loadProfile()
+        teamProfile = identityStore.loadApprovedProfile()
+        registration = identityStore.loadRegistration()
+            ?: ResponderRegistration(deviceId = identityStore.getOrCreateDeviceId())
         bleAdvertiser = ResponderBleAdvertiser(applicationContext, ::postStatus)
         bleServer = ResponderBleServer(
             context = applicationContext,
@@ -110,12 +121,36 @@ class MainActivity : ComponentActivity() {
             SaharaResponderTheme {
                 val configuredTeam = teamProfile
                 if (configuredTeam == null) {
-                    ResponderSetupScreen(
-                        onActivate = { selectedTeam ->
-                            teamProfile = identityStore.activate(selectedTeam)
-                            identityError = null
-                        },
-                    )
+                    val account = registration ?: ResponderRegistration(identityStore.getOrCreateDeviceId())
+                    when (account.status) {
+                        ResponderRegistrationStatus.UNREGISTERED -> ResponderRegistrationScreen(
+                            deviceId = account.deviceId,
+                            initial = account,
+                            loading = registrationLoading,
+                            error = registrationError,
+                            onSubmit = ::submitRegistration,
+                        )
+                        ResponderRegistrationStatus.PENDING -> PendingApprovalScreen(
+                            registration = account,
+                            loading = registrationLoading,
+                            error = registrationError,
+                            onCheckStatus = ::checkRegistrationStatus,
+                        )
+                        ResponderRegistrationStatus.REJECTED -> RejectedRegistrationScreen(
+                            registration = account,
+                            loading = registrationLoading,
+                            error = registrationError,
+                            onRetry = { registration = account.copy(status = ResponderRegistrationStatus.UNREGISTERED) },
+                            onCheckStatus = ::checkRegistrationStatus,
+                        )
+                        ResponderRegistrationStatus.APPROVED -> ResponderRegistrationScreen(
+                            deviceId = account.deviceId,
+                            initial = account,
+                            loading = registrationLoading,
+                            error = "Approved response is missing official team information. Contact SAHARA command.",
+                            onSubmit = ::submitRegistration,
+                        )
+                    }
                 } else {
                 var destination by remember { mutableStateOf(ResponderDestination.HOME) }
                 var selectedIncident by remember { mutableStateOf<ResponderIncident?>(null) }
@@ -187,15 +222,59 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        if (teamProfile != null) startOperationalServices()
+    }
+
+    private fun startOperationalServices() {
         val bluetoothDialogNeeded = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !hasAllBluetoothPermissions()
         ensurePermissionsAndStart()
         if (!bluetoothDialogNeeded) ensureLocationPermission()
     }
 
+    private fun submitRegistration(request: ResponderRegistration) {
+        if (registrationLoading) return
+        registrationLoading = true
+        registrationError = null
+        responderApiClient.register(request) { result ->
+            registrationLoading = false
+            result.onSuccess(::applyRegistration).onFailure {
+                registrationError = "Unable to reach SAHARA registration service. ${it.message.orEmpty()}"
+            }
+        }
+    }
+
+    private fun checkRegistrationStatus() {
+        val current = registration ?: return
+        if (registrationLoading) return
+        registrationLoading = true
+        registrationError = null
+        responderApiClient.checkStatus(current.deviceId) { result ->
+            registrationLoading = false
+            result.onSuccess(::applyRegistration).onFailure {
+                registrationError = "Unable to reach SAHARA registration service. ${it.message.orEmpty()}"
+            }
+        }
+    }
+
+    private fun applyRegistration(account: ResponderRegistration) {
+        identityStore.saveRegistration(account)
+        registration = account
+        val approved = account.approvedProfile()
+        if (account.status == ResponderRegistrationStatus.APPROVED && approved == null) {
+            registrationError = "Approval response did not include a complete official team assignment."
+            return
+        }
+        if (approved != null) {
+            teamProfile = approved
+            identityError = null
+            startOperationalServices()
+        }
+    }
+
     override fun onStart() {
         super.onStart()
         activityStarted = true
-        if (::locationProvider.isInitialized && hasLocationPermission()) locationProvider.start()
+        if (teamProfile != null && ::locationProvider.isInitialized && hasLocationPermission()) locationProvider.start()
     }
 
     override fun onStop() {
@@ -206,7 +285,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (::bleServer.isInitialized && hasRequiredPermissions()) startReceiverIfReady()
+        if (teamProfile != null && ::bleServer.isInitialized && hasRequiredPermissions()) startReceiverIfReady()
     }
 
     private fun ensurePermissionsAndStart() {

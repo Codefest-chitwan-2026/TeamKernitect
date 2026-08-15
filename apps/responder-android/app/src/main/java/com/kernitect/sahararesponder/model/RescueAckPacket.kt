@@ -7,6 +7,7 @@ import java.util.UUID
 data class RescueAckPacket(
     val id: String,
     val incidentId: String,
+    val responderId: String,
     val teamId: String,
     val teamName: String,
     val callsign: String,
@@ -26,6 +27,7 @@ data class RescueAckPacket(
         put("id", id)
         put("type", type)
         put("incidentId", incidentId)
+        put("responderId", responderId)
         put("teamId", teamId)
         put("teamName", teamName)
         put("callsign", callsign)
@@ -49,6 +51,7 @@ data class RescueAckPacket(
         ) = RescueAckPacket(
             id = "ACK-${UUID.randomUUID()}",
             incidentId = incident.id,
+            responderId = teamProfile.responderId,
             teamId = teamProfile.teamId,
             teamName = teamProfile.teamName,
             callsign = teamProfile.callsign,
