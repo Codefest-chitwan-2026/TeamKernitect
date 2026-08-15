@@ -14,6 +14,8 @@ import com.kernitect.sahararesponder.model.IncidentClaim
 import com.kernitect.sahararesponder.model.IncidentOwnership
 import com.kernitect.sahararesponder.model.ownershipOf
 import com.kernitect.sahararesponder.model.RescueLifecycleEvent
+import com.kernitect.sahararesponder.model.homeRecentReports
+import com.kernitect.sahararesponder.model.shouldShowMoreReports
 import com.kernitect.sahararesponder.ui.components.*
 import com.kernitect.sahararesponder.sync.CloudSyncSummary
 
@@ -33,9 +35,10 @@ fun ResponderHomeScreen(
     onSyncNow: () -> Unit,
     onOpenNotifications: () -> Unit,
     unreadNotificationCount: Int,
+    onSeeMoreReports: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val newest = incidents.sortedByDescending { it.receivedAt }
+    val newest = homeRecentReports(incidents)
     val priorityIncident = incidents.maxWithOrNull(
         compareBy<ResponderIncident> { priorityRank(it.priority) }.thenBy { it.receivedAt },
     )
@@ -75,6 +78,11 @@ fun ResponderHomeScreen(
                     val progress = latest?.let { "${it.status.displayName} • ${formatLifecycleTime(it.timestamp)}" }
                     CompactIncidentCard(incident, assignmentLabel = listOfNotNull(ownership.label(incidentClaims, teamProfile.teamId), progress).joinToString(" • ")) { onViewDetails(incident) }
                 }
+            }
+        }
+        if (shouldShowMoreReports(incidents)) item {
+            Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp), contentAlignment = androidx.compose.ui.Alignment.CenterEnd) {
+                TextButton(onClick = onSeeMoreReports) { Text("See more >") }
             }
         }
     }

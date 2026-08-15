@@ -16,6 +16,7 @@ class ResponderIdentityStore(context: Context) {
 
     fun loadApprovedProfile(): ResponderTeamProfile? {
         if (preferences.getString(KEY_APPROVAL_STATUS, null) != ResponderRegistrationStatus.APPROVED.name) return null
+        if (preferences.getString(KEY_AUTH_TOKEN, null).isNullOrBlank()) return null
         val registration = loadRegistration()
         return registration?.approvedProfile()
     }
@@ -37,6 +38,7 @@ class ResponderIdentityStore(context: Context) {
             teamName = preferences.getString(KEY_TEAM_NAME, null),
             callsign = preferences.getString(KEY_CALLSIGN, null),
             rejectionReason = preferences.getString(KEY_REJECTION_REASON, null),
+            authToken = preferences.getString(KEY_AUTH_TOKEN, null),
         )
     }
 
@@ -54,7 +56,23 @@ class ResponderIdentityStore(context: Context) {
             .putString(KEY_TEAM_NAME, registration.teamName)
             .putString(KEY_CALLSIGN, registration.callsign)
             .putString(KEY_REJECTION_REASON, registration.rejectionReason)
+            .putString(KEY_AUTH_TOKEN, registration.authToken)
             .apply()
+    }
+
+    fun hasOfflinePin() = !preferences.getString(KEY_PIN_SALT, null).isNullOrBlank() && !preferences.getString(KEY_PIN_VERIFIER, null).isNullOrBlank()
+    fun isLocked() = preferences.getBoolean(KEY_LOCKED, false)
+    fun configureOfflinePin(pin: String) { val record = OfflinePinSecurity.create(pin); preferences.edit().putString(KEY_PIN_SALT, record.salt).putString(KEY_PIN_VERIFIER, record.verifier).putInt(KEY_PIN_ITERATIONS, record.iterations).apply() }
+    fun verifyOfflinePin(pin: String): Boolean {
+        val salt = preferences.getString(KEY_PIN_SALT, null) ?: return false
+        val verifier = preferences.getString(KEY_PIN_VERIFIER, null) ?: return false
+        return OfflinePinSecurity.verify(pin, OfflinePinRecord(salt, verifier, preferences.getInt(KEY_PIN_ITERATIONS, OfflinePinRecord.ITERATIONS)))
+    }
+    fun lockApp(): Boolean { if (loadApprovedProfile() == null || !hasOfflinePin()) return false; preferences.edit().putBoolean(KEY_LOCKED, true).apply(); return true }
+    fun unlockApp() { preferences.edit().putBoolean(KEY_LOCKED, false).apply() }
+    fun removeAccount() {
+        val deviceId = getOrCreateDeviceId()
+        preferences.edit().clear().putString(KEY_DEVICE_ID, deviceId).apply()
     }
 
     private companion object {
@@ -71,5 +89,10 @@ class ResponderIdentityStore(context: Context) {
         const val KEY_TEAM_NAME = "team_name"
         const val KEY_CALLSIGN = "callsign"
         const val KEY_REJECTION_REASON = "rejection_reason"
+        const val KEY_AUTH_TOKEN = "auth_token"
+        const val KEY_PIN_SALT = "offline_pin_salt"
+        const val KEY_PIN_VERIFIER = "offline_pin_verifier"
+        const val KEY_PIN_ITERATIONS = "offline_pin_iterations"
+        const val KEY_LOCKED = "auth_locked"
     }
 }
