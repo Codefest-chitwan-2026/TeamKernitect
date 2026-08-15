@@ -16,13 +16,16 @@ import com.kernitect.sahararesponder.model.ResponderTeamProfile
 import com.kernitect.sahararesponder.model.IncidentClaim
 import com.kernitect.sahararesponder.model.IncidentOwnership
 import com.kernitect.sahararesponder.model.ownershipOf
+import com.kernitect.sahararesponder.model.RescueLifecycleEvent
 import com.kernitect.sahararesponder.ui.components.CompactIncidentCard
+import com.kernitect.sahararesponder.ui.components.formatLifecycleTime
 
 @Composable
 fun ActiveRescuesScreen(
     incidents: List<ResponderIncident>,
     teamProfile: ResponderTeamProfile,
     claimsByIncident: Map<String, List<IncidentClaim>>,
+    lifecycleEventsByIncident: Map<String, List<RescueLifecycleEvent>>,
     onViewDetails: (ResponderIncident) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -41,7 +44,11 @@ fun ActiveRescuesScreen(
             }
             items(incidents, key = { it.id }) { incident ->
                 val ownership = ownershipOf(claimsByIncident[incident.id].orEmpty(), teamProfile.teamId)
-                val label = if (ownership == IncidentOwnership.CONFLICT) "CLAIM CONFLICT • your team involved" else "Assigned to ${teamProfile.teamName} • ${teamProfile.callsign}"
+                val currentEvent = lifecycleEventsByIncident[incident.id].orEmpty()
+                    .filter { it.teamId == teamProfile.teamId }.maxByOrNull { it.status.rank }
+                val progress = currentEvent?.let { "${it.status.displayName.uppercase()} • since ${formatLifecycleTime(it.timestamp)}" }
+                val assignment = if (ownership == IncidentOwnership.CONFLICT) "CLAIM CONFLICT • your team involved" else "Assigned to ${teamProfile.teamName} • ${teamProfile.callsign}"
+                val label = listOfNotNull(assignment, progress).joinToString(" • ")
                 CompactIncidentCard(incident, assignmentLabel = label) { onViewDetails(incident) }
             }
         }

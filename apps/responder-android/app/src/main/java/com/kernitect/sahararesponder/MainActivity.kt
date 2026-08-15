@@ -36,11 +36,18 @@ import com.kernitect.sahararesponder.model.RescueClaimPacket
 import com.kernitect.sahararesponder.model.IncidentClaim
 import com.kernitect.sahararesponder.model.IncidentOwnership
 import com.kernitect.sahararesponder.model.ownershipOf
+import com.kernitect.sahararesponder.model.RescueLifecycle
+import com.kernitect.sahararesponder.model.RescueStatusEvent
+import com.kernitect.sahararesponder.model.RescueStatusPacket
+import com.kernitect.sahararesponder.model.latestStatusByTeam
+import com.kernitect.sahararesponder.model.RescueLifecycleEvent
+import com.kernitect.sahararesponder.model.recordLifecycleEvent
 import com.kernitect.sahararesponder.identity.ResponderIdentityStore
 import com.kernitect.sahararesponder.network.ResponderApiClient
 import com.kernitect.sahararesponder.mesh.AckRecord
 import com.kernitect.sahararesponder.mesh.AckSendState
 import com.kernitect.sahararesponder.mesh.ClaimRecord
+import com.kernitect.sahararesponder.mesh.StatusRecord
 import com.kernitect.sahararesponder.mesh.ResponderMeshSender
 import com.kernitect.sahararesponder.location.ResponderLocation
 import com.kernitect.sahararesponder.location.ResponderLocationProvider
@@ -65,6 +72,10 @@ class MainActivity : ComponentActivity() {
     private val claimRecords = mutableStateMapOf<String, ClaimRecord>()
     private val claimsByIncident = mutableStateMapOf<String, List<IncidentClaim>>()
     private val seenClaimIds = mutableSetOf<String>()
+    private val statusRecords = mutableStateMapOf<String, StatusRecord>()
+    private val statusesByIncident = mutableStateMapOf<String, List<RescueStatusEvent>>()
+    private val seenStatusIds = mutableSetOf<String>()
+    private val lifecycleEventsByIncident = mutableStateMapOf<String, List<RescueLifecycleEvent>>()
     private var receiverStarted = false
     private var activityStarted = false
     private var responderLocation by mutableStateOf<ResponderLocation?>(null)
@@ -125,6 +136,10 @@ class MainActivity : ComponentActivity() {
                 if (packet.type == RescueClaimPacket.TYPE) {
                     val existing = claimRecords[packet.incidentId] ?: return@runOnUiThread
                     claimRecords[packet.incidentId] = existing.copy(state = state, failureReason = failureReason)
+                } else if (packet.type == RescueStatusPacket.TYPE) {
+                    val existing = statusRecords[packet.id] ?: return@runOnUiThread
+                    statusRecords[packet.id] = existing.copy(state = state, failureReason = failureReason)
+                    Log.i(TAG, if (state == AckSendState.SENT_TO_MESH) "Status written to mesh neighbor: ${packet.id}" else "Status ${state.name}: ${packet.id}")
                 } else {
                     val existing = ackRecords[packet.incidentId] ?: return@runOnUiThread
                     ackRecords[packet.incidentId] = existing.copy(state = state, failureReason = failureReason)
@@ -180,7 +195,7 @@ class MainActivity : ComponentActivity() {
                     },
                 ) { padding ->
                     val focused = focusedMapIncident
-                    val selected = selectedIncident
+                    val selected = selectedIncident?.let { chosen -> incidents.firstOrNull { it.id == chosen.id } ?: chosen }
                     if (focused != null) {
                         ResponderMapScreen(
                             incidents = incidents,
@@ -200,6 +215,9 @@ class MainActivity : ComponentActivity() {
                             ackRecord = ackRecords[selected.id],
                             claimRecord = claimRecords[selected.id],
                             claims = claimsByIncident[selected.id].orEmpty(),
+                            statusEvents = statusesByIncident[selected.id].orEmpty(),
+                            statusRecord = latestStatusRecord(selected.id),
+                            lifecycleEvents = lifecycleEventsByIncident[selected.id].orEmpty(),
                             teamProfile = configuredTeam,
                             identityError = identityError,
                             onAcceptRescue = {
@@ -208,6 +226,8 @@ class MainActivity : ComponentActivity() {
                             },
                             onRetryAck = { retryAck(selected.id) },
                             onRetryClaim = { retryClaim(selected.id) },
+                            onAdvanceLifecycle = { next -> advanceLifecycle(selected, next) },
+                            onRetryStatus = { retryStatus(selected.id) },
                             modifier = Modifier.padding(padding),
                         )
                     } else {
@@ -220,6 +240,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenMap = { destination = ResponderDestination.MAP },
                                 teamProfile = configuredTeam,
                                 claimsByIncident = claimsByIncident,
+                                lifecycleEventsByIncident = lifecycleEventsByIncident,
                                 modifier = Modifier.padding(padding),
                             )
                             ResponderDestination.MAP -> ResponderMapScreen(
@@ -231,10 +252,11 @@ class MainActivity : ComponentActivity() {
                             ResponderDestination.ACTIVE -> ActiveRescuesScreen(
                                 incidents = incidents.filter {
                                     ownershipOf(claimsByIncident[it.id].orEmpty(), configuredTeam.teamId) in
-                                        setOf(IncidentOwnership.CLAIMED_BY_ME, IncidentOwnership.CONFLICT)
+                                        setOf(IncidentOwnership.CLAIMED_BY_ME, IncidentOwnership.CONFLICT) && it.status in ACTIVE_STATUSES
                                 },
                                 teamProfile = configuredTeam,
                                 claimsByIncident = claimsByIncident,
+                                lifecycleEventsByIncident = lifecycleEventsByIncident,
                                 onViewDetails = { selectedIncident = it },
                                 modifier = Modifier.padding(padding),
                             )
@@ -350,6 +372,10 @@ class MainActivity : ComponentActivity() {
             handleClaim(raw)
             return
         }
+        if (type == RescueStatusPacket.TYPE) {
+            handleStatus(raw)
+            return
+        }
         if (type != RescuePacket.TYPE_SOS) {
             Log.d(TAG, "Unknown packet type ignored: $type")
             return
@@ -370,6 +396,9 @@ class MainActivity : ComponentActivity() {
             }
             Log.i(TAG, "SOS parsed: ${packet.id}, priority=${packet.priority}")
             incidents.add(0, ResponderIncident.fromPacket(packet))
+            latestStatusByTeam(statusesByIncident[packet.id].orEmpty()).values
+                .sortedBy { RescueLifecycle.parse(it.status)?.rank }
+                .forEach { applyDisplayedStatus(packet.id, it.teamId, it.status) }
             meshStatus = "SOS received"
         }
     }
@@ -382,9 +411,47 @@ class MainActivity : ComponentActivity() {
         runOnUiThread {
             if (!seenClaimIds.add(packet.id)) return@runOnUiThread
             claimsByIncident[packet.incidentId] = claimsByIncident[packet.incidentId].orEmpty() + packet.asClaim()
+            recordEvent(packet.incidentId, RescueLifecycle.ACCEPTED.name, packet.timestamp, packet.teamId, packet.teamName, packet.callsign, packet.id)
+            latestStatusByTeam(statusesByIncident[packet.incidentId].orEmpty())[packet.teamId]?.let {
+                applyDisplayedStatus(packet.incidentId, packet.teamId, it.status)
+            }
             Log.i(TAG, "Claim received: ${packet.id} for ${packet.incidentId}")
             if (packet.canRelay() && hasOutgoingScanPermission()) meshSender.send(packet.nextHop())
         }
+    }
+
+    private fun handleStatus(raw: String) {
+        val packet = RescueStatusPacket.fromJson(raw) ?: run {
+            Log.w(TAG, "Malformed RESCUE_STATUS ignored")
+            return
+        }
+        runOnUiThread {
+            if (!seenStatusIds.add(packet.id)) {
+                Log.d(TAG, "Duplicate status ignored: ${packet.id}")
+                return@runOnUiThread
+            }
+            val existing = statusesByIncident[packet.incidentId].orEmpty()
+            val prior = latestStatusByTeam(existing)[packet.teamId]
+            if (prior != null && !RescueLifecycle.progresses(prior.status, packet.status)) {
+                Log.i(TAG, "Ignored lifecycle regression ${packet.status} after ${prior.status} for ${packet.incidentId}")
+            } else {
+                statusesByIncident[packet.incidentId] = existing + packet.asEvent()
+                recordEvent(packet.incidentId, packet.status, packet.timestamp, packet.teamId, packet.teamName, packet.callsign, packet.id)
+                applyDisplayedStatus(packet.incidentId, packet.teamId, packet.status)
+                Log.i(TAG, "Received RESCUE_STATUS ${packet.id}: ${packet.status}")
+            }
+            if (packet.canRelay() && hasOutgoingScanPermission()) meshSender.send(packet.nextHop())
+        }
+    }
+
+    private fun applyDisplayedStatus(incidentId: String, packetTeamId: String, status: String) {
+        val index = incidents.indexOfFirst { it.id == incidentId }
+        if (index < 0) return
+        val localTeamId = teamProfile?.teamId
+        val ownership = localTeamId?.let { ownershipOf(claimsByIncident[incidentId].orEmpty(), it) }
+        if ((packetTeamId == localTeamId || ownership == IncidentOwnership.CLAIMED_BY_OTHER) &&
+            RescueLifecycle.progresses(incidents[index].status, status)
+        ) incidents[index] = incidents[index].copy(status = status)
     }
 
     private fun acceptIncident(incident: ResponderIncident): ResponderIncident {
@@ -408,6 +475,10 @@ class MainActivity : ComponentActivity() {
                 Log.i(TAG, "Claim created: ${it.packet.id}")
             }
         }
+        recordEvent(
+            incident.id, RescueLifecycle.ACCEPTED.name, claimRecord.packet.timestamp,
+            configuredTeam.teamId, configuredTeam.teamName, configuredTeam.callsign, claimRecord.packet.id,
+        )
         val record = ackRecords.getOrPut(incident.id) {
             AckRecord(RescueAckPacket.create(accepted, responderLocation, configuredTeam)).also {
                 Log.i(TAG, "ACK created: ${it.packet.id}")
@@ -416,6 +487,58 @@ class MainActivity : ComponentActivity() {
         sendClaim(claimRecord)
         sendAck(record)
         return accepted
+    }
+
+    private fun advanceLifecycle(incident: ResponderIncident, next: RescueLifecycle) {
+        val profile = teamProfile ?: run {
+            identityError = "Approved responder identity is required to update rescue status."
+            return
+        }
+        val current = RescueLifecycle.parse(incident.status) ?: return
+        val ownership = ownershipOf(claimsByIncident[incident.id].orEmpty(), profile.teamId)
+        if (next != current.next() || ownership !in setOf(IncidentOwnership.CLAIMED_BY_ME, IncidentOwnership.CONFLICT)) return
+        val index = incidents.indexOfFirst { it.id == incident.id }
+        if (index < 0) return
+        val updated = incidents[index].copy(status = next.name)
+        incidents[index] = updated
+        val packet = RescueStatusPacket.create(updated, next, responderLocation, profile)
+        seenStatusIds.add(packet.id)
+        statusesByIncident[incident.id] = statusesByIncident[incident.id].orEmpty() + packet.asEvent()
+        recordEvent(incident.id, next.name, packet.timestamp, profile.teamId, profile.teamName, profile.callsign, packet.id)
+        statusRecords[packet.id] = StatusRecord(packet)
+        Log.i(TAG, "Incident ${incident.id} -> ${next.name}; created ${packet.id}")
+        sendStatus(statusRecords.getValue(packet.id))
+    }
+
+    private fun recordEvent(
+        incidentId: String, status: String, timestamp: Long, teamId: String,
+        teamName: String, callsign: String, sourcePacketId: String,
+    ) {
+        val lifecycle = RescueLifecycle.parse(status) ?: return
+        lifecycleEventsByIncident[incidentId] = recordLifecycleEvent(
+            lifecycleEventsByIncident[incidentId].orEmpty(),
+            RescueLifecycleEvent(lifecycle, timestamp, teamId, teamName, callsign, sourcePacketId),
+        )
+    }
+
+    private fun latestStatusRecord(incidentId: String): StatusRecord? =
+        statusRecords.values.filter { it.packet.incidentId == incidentId }.maxByOrNull { it.packet.timestamp }
+
+    private fun retryStatus(incidentId: String) {
+        latestStatusRecord(incidentId)?.let {
+            Log.i(TAG, "Retrying ${it.packet.id}")
+            sendStatus(it)
+        }
+    }
+
+    private fun sendStatus(record: StatusRecord) {
+        if (!hasOutgoingScanPermission()) {
+            statusRecords[record.packet.id] = record.copy(state = AckSendState.FAILED, failureReason = "Bluetooth scan permission required")
+            Log.w(TAG, "Status send failed: ${record.packet.id}")
+            return
+        }
+        Log.i(TAG, "Sending status ${record.packet.id}")
+        meshSender.send(record.packet)
     }
 
     private fun retryClaim(incidentId: String) {

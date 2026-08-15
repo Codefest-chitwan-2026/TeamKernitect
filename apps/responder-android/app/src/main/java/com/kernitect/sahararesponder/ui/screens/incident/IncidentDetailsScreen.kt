@@ -25,6 +25,11 @@ import com.kernitect.sahararesponder.mesh.ClaimRecord
 import com.kernitect.sahararesponder.model.IncidentClaim
 import com.kernitect.sahararesponder.model.IncidentOwnership
 import com.kernitect.sahararesponder.model.ownershipOf
+import com.kernitect.sahararesponder.model.RescueLifecycle
+import com.kernitect.sahararesponder.model.RescueStatusEvent
+import com.kernitect.sahararesponder.model.latestStatusByTeam
+import com.kernitect.sahararesponder.model.RescueLifecycleEvent
+import com.kernitect.sahararesponder.mesh.StatusRecord
 import com.kernitect.sahararesponder.ui.components.*
 
 @Composable
@@ -37,18 +42,29 @@ fun IncidentDetailsScreen(
     ackRecord: AckRecord?,
     claimRecord: ClaimRecord?,
     claims: List<IncidentClaim>,
+    statusEvents: List<RescueStatusEvent>,
+    statusRecord: StatusRecord?,
+    lifecycleEvents: List<RescueLifecycleEvent>,
     onAcceptRescue: () -> Unit,
     onRetryAck: () -> Unit,
     onRetryClaim: () -> Unit,
+    onAdvanceLifecycle: (RescueLifecycle) -> Unit,
+    onRetryStatus: () -> Unit,
     teamProfile: ResponderTeamProfile,
     identityError: String?,
     modifier: Modifier = Modifier,
 ) {
     var showAcceptDialog by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var pendingTransition by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<RescueLifecycle?>(null) }
     val validVictim = RescueNavigationCalculator.isValidCoordinate(incident.latitude, incident.longitude)
     val distance = responderLocation?.let { RescueNavigationCalculator.distanceMeters(it, incident.latitude, incident.longitude) }
     val bearing = responderLocation?.let { RescueNavigationCalculator.bearingDegrees(it, incident.latitude, incident.longitude) }
     val ownership = ownershipOf(claims, teamProfile.teamId)
+    val lifecycle = RescueLifecycle.parse(incident.status) ?: RescueLifecycle.NEW
+    val canControl = ownership in setOf(IncidentOwnership.CLAIMED_BY_ME, IncidentOwnership.CONFLICT)
+    val progressTeamId = if (lifecycleEvents.any { it.teamId == teamProfile.teamId }) teamProfile.teamId
+        else lifecycleEvents.maxByOrNull { it.status.rank }?.teamId
+    val progressEvents = lifecycleEvents.filter { it.teamId == progressTeamId }.associateBy { it.status }
     Column(modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, "Back to responder home") }
@@ -122,17 +138,57 @@ fun IncidentDetailsScreen(
                 }
                 identityError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold) }
             }
+            DetailCard("Rescue Progress") {
+                RescueLifecycle.entries.filter { it != RescueLifecycle.NEW }.forEach { step ->
+                    val marker = when { step.rank < lifecycle.rank -> "✓"; step == lifecycle -> "●"; else -> "○" }
+                    Text("$marker ${step.displayName}", fontWeight = if (step == lifecycle) FontWeight.Bold else FontWeight.Normal)
+                    progressEvents[step]?.let { event ->
+                        Text(formatLifecycleDateTime(event.timestamp), Modifier.padding(start = 20.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                latestStatusByTeam(statusEvents).values.forEach { event ->
+                    Text("${event.teamName}: ${RescueLifecycle.parse(event.status)?.displayName ?: event.status}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                statusRecord?.let { record ->
+                    DetailRow("Latest mesh status", statusSendMessage(record.state))
+                    record.failureReason?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    if (record.state == AckSendState.FAILED) OutlinedButton(onClick = onRetryStatus, Modifier.fillMaxWidth()) { Text("RETRY STATUS") }
+                }
+                if (responderLocation == null) Text("GPS unavailable: this event uses protocol fallback coordinates, not a real location.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            DetailCard("Rescue Activity") {
+                if (lifecycleEvents.isEmpty()) Text("No lifecycle activity recorded yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                lifecycleEvents.forEach { event ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(formatLifecycleTime(event.timestamp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, modifier = Modifier.width(72.dp))
+                        Column {
+                            Text(event.activityText(), fontWeight = FontWeight.SemiBold)
+                            Text(formatLifecycleDateTime(event.timestamp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
             Spacer(Modifier.height(4.dp))
         }
         Surface(shadowElevation = 8.dp) {
             Column(Modifier.fillMaxWidth().padding(16.dp)) {
                 Button(
-                    onClick = { showAcceptDialog = true },
-                    enabled = incident.status == "NEW" && ownership == IncidentOwnership.UNCLAIMED,
+                    onClick = {
+                        if (lifecycle == RescueLifecycle.NEW) showAcceptDialog = true else pendingTransition = lifecycle.next()
+                    },
+                    enabled = (lifecycle == RescueLifecycle.NEW && ownership == IncidentOwnership.UNCLAIMED) ||
+                        (lifecycle.next() != null && canControl),
                     modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
                 ) {
                     Text(when {
-                        incident.status != "NEW" -> "RESCUE ACCEPTED"
+                        lifecycle == RescueLifecycle.RESCUED -> "RESCUE COMPLETE"
+                        lifecycle != RescueLifecycle.NEW -> when (lifecycle.next()) {
+                            RescueLifecycle.ON_THE_WAY -> "MARK ON THE WAY"
+                            RescueLifecycle.NEARBY -> "MARK NEARBY"
+                            RescueLifecycle.ARRIVED -> "MARK ARRIVED"
+                            RescueLifecycle.RESCUED -> "MARK RESCUED"
+                            else -> "RESCUE COMPLETE"
+                        }
                         ownership == IncidentOwnership.CLAIMED_BY_OTHER -> "CLAIMED BY ANOTHER TEAM"
                         ownership == IncidentOwnership.CLAIMED_BY_ME -> "CLAIMED BY YOUR TEAM"
                         ownership == IncidentOwnership.CONFLICT -> "CLAIM CONFLICT"
@@ -162,6 +218,15 @@ fun IncidentDetailsScreen(
             },
         )
     }
+    pendingTransition?.let { next ->
+        AlertDialog(
+            onDismissRequest = { pendingTransition = null },
+            title = { Text("Mark ${next.displayName}?") },
+            text = { Text(if (next == RescueLifecycle.RESCUED) "Confirm that the victim has been reached and this rescue is complete." else "Confirm this operational rescue status change.") },
+            dismissButton = { TextButton(onClick = { pendingTransition = null }) { Text("Cancel") } },
+            confirmButton = { Button(onClick = { pendingTransition = null; onAdvanceLifecycle(next) }) { Text("Confirm") } },
+        )
+    }
 }
 
 @Composable
@@ -180,4 +245,22 @@ private fun DetailRow(label: String, value: String) {
         Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(0.38f))
         Text(value, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(0.62f))
     }
+}
+
+private fun statusSendMessage(state: AckSendState) = when (state) {
+    AckSendState.IDLE -> "Status ready"
+    AckSendState.SEARCHING -> "Searching for nearby RESCUEMESH relay…"
+    AckSendState.CONNECTING -> "Connecting to nearby relay…"
+    AckSendState.SENDING -> "Sending lifecycle status…"
+    AckSendState.SENT_TO_MESH -> "Status sent into RESCUEMESH"
+    AckSendState.FAILED -> "Status not yet sent to mesh"
+}
+
+private fun RescueLifecycleEvent.activityText() = when (status) {
+    RescueLifecycle.NEW -> "New rescue reported"
+    RescueLifecycle.ACCEPTED -> "Rescue accepted by $teamName"
+    RescueLifecycle.ON_THE_WAY -> "$teamName is on the way"
+    RescueLifecycle.NEARBY -> "$teamName marked nearby"
+    RescueLifecycle.ARRIVED -> "$teamName arrived"
+    RescueLifecycle.RESCUED -> "Rescue completed by $teamName"
 }

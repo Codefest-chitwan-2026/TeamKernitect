@@ -14,6 +14,7 @@ import com.kernitect.sahararesponder.model.ResponderTeamProfile
 import com.kernitect.sahararesponder.model.IncidentClaim
 import com.kernitect.sahararesponder.model.IncidentOwnership
 import com.kernitect.sahararesponder.model.ownershipOf
+import com.kernitect.sahararesponder.model.RescueLifecycleEvent
 import com.kernitect.sahararesponder.ui.components.*
 
 private val activeStatuses = setOf("ACCEPTED", "ON_THE_WAY", "NEARBY", "ARRIVED")
@@ -27,6 +28,7 @@ fun ResponderHomeScreen(
     onOpenMap: () -> Unit,
     teamProfile: ResponderTeamProfile,
     claimsByIncident: Map<String, List<IncidentClaim>>,
+    lifecycleEventsByIncident: Map<String, List<RescueLifecycleEvent>>,
     modifier: Modifier = Modifier,
 ) {
     val newest = incidents.sortedByDescending { it.receivedAt }
@@ -63,7 +65,9 @@ fun ResponderHomeScreen(
             items(newest, key = { it.id }) { incident ->
                 Box(Modifier.padding(horizontal = 20.dp)) {
                     val ownership = ownershipOf(claimsByIncident[incident.id].orEmpty(), teamProfile.teamId)
-                    CompactIncidentCard(incident, assignmentLabel = ownership.label()) { onViewDetails(incident) }
+                    val latest = lifecycleEventsByIncident[incident.id].orEmpty().maxByOrNull { it.timestamp }
+                    val progress = latest?.let { "${it.status.displayName} • ${formatLifecycleTime(it.timestamp)}" }
+                    CompactIncidentCard(incident, assignmentLabel = listOfNotNull(ownership.label(), progress).joinToString(" • ")) { onViewDetails(incident) }
                 }
             }
         }

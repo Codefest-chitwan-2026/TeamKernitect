@@ -35,6 +35,12 @@ fun priorityRank(priority: String) = when (priority.uppercase()) {
 fun formatIncidentTime(timestamp: Long): String =
     SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(Date(timestamp))
 
+fun formatLifecycleDateTime(timestamp: Long): String =
+    SimpleDateFormat("d MMM yyyy • h:mm a", Locale.getDefault()).format(Date(timestamp))
+
+fun formatLifecycleTime(timestamp: Long): String =
+    SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(timestamp))
+
 @Composable
 fun ResponderTopBar(unreadCount: Int) {
     Row(
