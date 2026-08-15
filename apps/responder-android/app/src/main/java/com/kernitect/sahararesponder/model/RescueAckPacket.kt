@@ -5,8 +5,8 @@ import org.json.JSONObject
 import java.util.UUID
 
 data class RescueAckPacket(
-    val id: String,
-    val incidentId: String,
+    override val id: String,
+    override val incidentId: String,
     val responderId: String,
     val teamId: String,
     val teamName: String,
@@ -19,11 +19,11 @@ data class RescueAckPacket(
     val longitude: Double,
     val hopCount: Int = 0,
     val ttl: Int = 5,
-    val type: String = "SOS_ACK",
+    override val type: String = "SOS_ACK",
     val status: String = "RESCUE_RECEIVED",
     val message: String = "RESCUE_RECEIVED|$incidentId|$teamId|$teamName|$callsign",
-) {
-    fun toJson(): String = JSONObject().apply {
+) : MeshOutgoingPacket {
+    override fun toJson(): String = JSONObject().apply {
         put("id", id)
         put("type", type)
         put("incidentId", incidentId)

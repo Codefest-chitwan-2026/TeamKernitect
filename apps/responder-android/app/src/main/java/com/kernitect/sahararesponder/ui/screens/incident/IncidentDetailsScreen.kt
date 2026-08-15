@@ -21,6 +21,10 @@ import com.kernitect.sahararesponder.location.RescueNavigationCalculator
 import com.kernitect.sahararesponder.location.ResponderLocation
 import com.kernitect.sahararesponder.mesh.AckRecord
 import com.kernitect.sahararesponder.mesh.AckSendState
+import com.kernitect.sahararesponder.mesh.ClaimRecord
+import com.kernitect.sahararesponder.model.IncidentClaim
+import com.kernitect.sahararesponder.model.IncidentOwnership
+import com.kernitect.sahararesponder.model.ownershipOf
 import com.kernitect.sahararesponder.ui.components.*
 
 @Composable
@@ -31,8 +35,11 @@ fun IncidentDetailsScreen(
     onBack: () -> Unit,
     onOpenMap: () -> Unit,
     ackRecord: AckRecord?,
+    claimRecord: ClaimRecord?,
+    claims: List<IncidentClaim>,
     onAcceptRescue: () -> Unit,
     onRetryAck: () -> Unit,
+    onRetryClaim: () -> Unit,
     teamProfile: ResponderTeamProfile,
     identityError: String?,
     modifier: Modifier = Modifier,
@@ -41,6 +48,7 @@ fun IncidentDetailsScreen(
     val validVictim = RescueNavigationCalculator.isValidCoordinate(incident.latitude, incident.longitude)
     val distance = responderLocation?.let { RescueNavigationCalculator.distanceMeters(it, incident.latitude, incident.longitude) }
     val bearing = responderLocation?.let { RescueNavigationCalculator.bearingDegrees(it, incident.latitude, incident.longitude) }
+    val ownership = ownershipOf(claims, teamProfile.teamId)
     Column(modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, "Back to responder home") }
@@ -81,6 +89,20 @@ fun IncidentDetailsScreen(
             }
             DetailCard("Rescue Status") {
                 DetailRow("Current status", incident.status)
+                DetailRow("Ownership", when (ownership) {
+                    IncidentOwnership.UNCLAIMED -> "Unclaimed"
+                    IncidentOwnership.CLAIMED_BY_ME -> "Claimed by your team"
+                    IncidentOwnership.CLAIMED_BY_OTHER -> "Claimed by another team"
+                    IncidentOwnership.CONFLICT -> "CONFLICT"
+                })
+                claims.distinctBy { it.teamId }.forEach { claim ->
+                    Text("${claim.teamName} • ${claim.callsign} (${claim.district})", fontWeight = FontWeight.SemiBold)
+                }
+                if (ownership == IncidentOwnership.CONFLICT) {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                        Text("Multiple responder teams claimed this rescue. Coordinate before proceeding.", Modifier.padding(12.dp), color = MaterialTheme.colorScheme.onErrorContainer, fontWeight = FontWeight.Bold)
+                    }
+                }
                 if (incident.status == "NEW") {
                     Text("This request has not been accepted.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     DetailRow("Responder", "${teamProfile.teamName} • ${teamProfile.callsign}")
@@ -88,6 +110,11 @@ fun IncidentDetailsScreen(
                     Text("Accepted by ${teamProfile.teamName}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     Text("${teamProfile.callsign} • ${teamProfile.district}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     DetailRow("Acknowledgement", ackRecord?.state?.message ?: "Preparing acknowledgement…")
+                    DetailRow("Rescue claim", claimRecord?.state?.message ?: "Claim recorded from mesh")
+                    claimRecord?.failureReason?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    if (claimRecord?.state == AckSendState.FAILED) {
+                        OutlinedButton(onClick = onRetryClaim, modifier = Modifier.fillMaxWidth()) { Text("RETRY CLAIM") }
+                    }
                     ackRecord?.failureReason?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     if (ackRecord?.state == AckSendState.FAILED) {
                         OutlinedButton(onClick = onRetryAck, modifier = Modifier.fillMaxWidth()) { Text("RETRY ACK") }
@@ -101,10 +128,16 @@ fun IncidentDetailsScreen(
             Column(Modifier.fillMaxWidth().padding(16.dp)) {
                 Button(
                     onClick = { showAcceptDialog = true },
-                    enabled = incident.status == "NEW",
+                    enabled = incident.status == "NEW" && ownership == IncidentOwnership.UNCLAIMED,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
                 ) {
-                    Text(if (incident.status == "NEW") "ACCEPT RESCUE" else "RESCUE ACCEPTED")
+                    Text(when {
+                        incident.status != "NEW" -> "RESCUE ACCEPTED"
+                        ownership == IncidentOwnership.CLAIMED_BY_OTHER -> "CLAIMED BY ANOTHER TEAM"
+                        ownership == IncidentOwnership.CLAIMED_BY_ME -> "CLAIMED BY YOUR TEAM"
+                        ownership == IncidentOwnership.CONFLICT -> "CLAIM CONFLICT"
+                        else -> "ACCEPT RESCUE"
+                    })
                 }
                 Text(
                     if (incident.status == "NEW") "Confirmation required" else "Local responder assignment active",

@@ -13,12 +13,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import com.kernitect.sahararesponder.model.ResponderIncident
 import com.kernitect.sahararesponder.model.ResponderTeamProfile
+import com.kernitect.sahararesponder.model.IncidentClaim
+import com.kernitect.sahararesponder.model.IncidentOwnership
+import com.kernitect.sahararesponder.model.ownershipOf
 import com.kernitect.sahararesponder.ui.components.CompactIncidentCard
 
 @Composable
 fun ActiveRescuesScreen(
     incidents: List<ResponderIncident>,
     teamProfile: ResponderTeamProfile,
+    claimsByIncident: Map<String, List<IncidentClaim>>,
     onViewDetails: (ResponderIncident) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -36,7 +40,9 @@ fun ActiveRescuesScreen(
                 Text("${incidents.size} accepted rescue${if (incidents.size == 1) "" else "s"}", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             items(incidents, key = { it.id }) { incident ->
-                CompactIncidentCard(incident, assignmentLabel = "Assigned to ${teamProfile.teamName} • ${teamProfile.callsign}") { onViewDetails(incident) }
+                val ownership = ownershipOf(claimsByIncident[incident.id].orEmpty(), teamProfile.teamId)
+                val label = if (ownership == IncidentOwnership.CONFLICT) "CLAIM CONFLICT • your team involved" else "Assigned to ${teamProfile.teamName} • ${teamProfile.callsign}"
+                CompactIncidentCard(incident, assignmentLabel = label) { onViewDetails(incident) }
             }
         }
     }

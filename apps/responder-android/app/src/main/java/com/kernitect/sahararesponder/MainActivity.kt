@@ -32,10 +32,15 @@ import com.kernitect.sahararesponder.model.RescueAckPacket
 import com.kernitect.sahararesponder.model.ResponderTeamProfile
 import com.kernitect.sahararesponder.model.ResponderRegistration
 import com.kernitect.sahararesponder.model.ResponderRegistrationStatus
+import com.kernitect.sahararesponder.model.RescueClaimPacket
+import com.kernitect.sahararesponder.model.IncidentClaim
+import com.kernitect.sahararesponder.model.IncidentOwnership
+import com.kernitect.sahararesponder.model.ownershipOf
 import com.kernitect.sahararesponder.identity.ResponderIdentityStore
 import com.kernitect.sahararesponder.network.ResponderApiClient
 import com.kernitect.sahararesponder.mesh.AckRecord
 import com.kernitect.sahararesponder.mesh.AckSendState
+import com.kernitect.sahararesponder.mesh.ClaimRecord
 import com.kernitect.sahararesponder.mesh.ResponderMeshSender
 import com.kernitect.sahararesponder.location.ResponderLocation
 import com.kernitect.sahararesponder.location.ResponderLocationProvider
@@ -50,12 +55,16 @@ import com.kernitect.sahararesponder.ui.screens.setup.RejectedRegistrationScreen
 import com.kernitect.sahararesponder.ui.screens.setup.ResponderRegistrationScreen
 import com.kernitect.sahararesponder.ui.theme.SaharaResponderTheme
 import org.osmdroid.config.Configuration
+import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
     private var meshStatus by mutableStateOf("Starting RESCUEMESH")
     private val incidents = mutableStateListOf<ResponderIncident>()
     private val seenPacketIds = mutableSetOf<String>()
     private val ackRecords = mutableStateMapOf<String, AckRecord>()
+    private val claimRecords = mutableStateMapOf<String, ClaimRecord>()
+    private val claimsByIncident = mutableStateMapOf<String, List<IncidentClaim>>()
+    private val seenClaimIds = mutableSetOf<String>()
     private var receiverStarted = false
     private var activityStarted = false
     private var responderLocation by mutableStateOf<ResponderLocation?>(null)
@@ -111,10 +120,15 @@ class MainActivity : ComponentActivity() {
             } },
             onStatus = { status -> runOnUiThread { locationStatus = status } },
         )
-        meshSender = ResponderMeshSender(applicationContext) { incidentId, state, failureReason ->
+        meshSender = ResponderMeshSender(applicationContext) { packet, state, failureReason ->
             runOnUiThread {
-                val existing = ackRecords[incidentId] ?: return@runOnUiThread
-                ackRecords[incidentId] = existing.copy(state = state, failureReason = failureReason)
+                if (packet.type == RescueClaimPacket.TYPE) {
+                    val existing = claimRecords[packet.incidentId] ?: return@runOnUiThread
+                    claimRecords[packet.incidentId] = existing.copy(state = state, failureReason = failureReason)
+                } else {
+                    val existing = ackRecords[packet.incidentId] ?: return@runOnUiThread
+                    ackRecords[packet.incidentId] = existing.copy(state = state, failureReason = failureReason)
+                }
             }
         }
         setContent {
@@ -184,6 +198,8 @@ class MainActivity : ComponentActivity() {
                             onBack = { selectedIncident = null },
                             onOpenMap = { focusedMapIncident = selected },
                             ackRecord = ackRecords[selected.id],
+                            claimRecord = claimRecords[selected.id],
+                            claims = claimsByIncident[selected.id].orEmpty(),
                             teamProfile = configuredTeam,
                             identityError = identityError,
                             onAcceptRescue = {
@@ -191,6 +207,7 @@ class MainActivity : ComponentActivity() {
                                 selectedIncident = accepted
                             },
                             onRetryAck = { retryAck(selected.id) },
+                            onRetryClaim = { retryClaim(selected.id) },
                             modifier = Modifier.padding(padding),
                         )
                     } else {
@@ -202,6 +219,7 @@ class MainActivity : ComponentActivity() {
                                 responderLocated = responderLocation != null,
                                 onOpenMap = { destination = ResponderDestination.MAP },
                                 teamProfile = configuredTeam,
+                                claimsByIncident = claimsByIncident,
                                 modifier = Modifier.padding(padding),
                             )
                             ResponderDestination.MAP -> ResponderMapScreen(
@@ -211,8 +229,12 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.padding(padding),
                             )
                             ResponderDestination.ACTIVE -> ActiveRescuesScreen(
-                                incidents = incidents.filter { it.status in ACTIVE_STATUSES },
+                                incidents = incidents.filter {
+                                    ownershipOf(claimsByIncident[it.id].orEmpty(), configuredTeam.teamId) in
+                                        setOf(IncidentOwnership.CLAIMED_BY_ME, IncidentOwnership.CONFLICT)
+                                },
                                 teamProfile = configuredTeam,
+                                claimsByIncident = claimsByIncident,
                                 onViewDetails = { selectedIncident = it },
                                 modifier = Modifier.padding(padding),
                             )
@@ -323,6 +345,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handlePacket(raw: String) {
+        val type = runCatching { JSONObject(raw).optString("type") }.getOrNull()
+        if (type == RescueClaimPacket.TYPE) {
+            handleClaim(raw)
+            return
+        }
+        if (type != RescuePacket.TYPE_SOS) {
+            Log.d(TAG, "Unknown packet type ignored: $type")
+            return
+        }
         val packet = RescuePacket.fromJson(raw)
         if (packet == null) {
             Log.w(TAG, "Malformed JSON ignored")
@@ -343,6 +374,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun handleClaim(raw: String) {
+        val packet = RescueClaimPacket.fromJson(raw) ?: run {
+            Log.w(TAG, "Malformed RESCUE_CLAIM ignored")
+            return
+        }
+        runOnUiThread {
+            if (!seenClaimIds.add(packet.id)) return@runOnUiThread
+            claimsByIncident[packet.incidentId] = claimsByIncident[packet.incidentId].orEmpty() + packet.asClaim()
+            Log.i(TAG, "Claim received: ${packet.id} for ${packet.incidentId}")
+            if (packet.canRelay() && hasOutgoingScanPermission()) meshSender.send(packet.nextHop())
+        }
+    }
+
     private fun acceptIncident(incident: ResponderIncident): ResponderIncident {
         if (incident.status != "NEW") return incident
         val configuredTeam = teamProfile ?: run {
@@ -352,17 +396,38 @@ class MainActivity : ComponentActivity() {
         }
         val index = incidents.indexOfFirst { it.id == incident.id }
         if (index < 0) return incident
+        if (ownershipOf(claimsByIncident[incident.id].orEmpty(), configuredTeam.teamId) != IncidentOwnership.UNCLAIMED) return incident
         identityError = null
         val accepted = incident.copy(status = "ACCEPTED")
         incidents[index] = accepted
         Log.i(TAG, "Incident accepted: ${incident.id}")
+        val claimRecord = claimRecords.getOrPut(incident.id) {
+            ClaimRecord(RescueClaimPacket.create(accepted, responderLocation, configuredTeam)).also {
+                seenClaimIds.add(it.packet.id)
+                claimsByIncident[incident.id] = claimsByIncident[incident.id].orEmpty() + it.packet.asClaim()
+                Log.i(TAG, "Claim created: ${it.packet.id}")
+            }
+        }
         val record = ackRecords.getOrPut(incident.id) {
             AckRecord(RescueAckPacket.create(accepted, responderLocation, configuredTeam)).also {
                 Log.i(TAG, "ACK created: ${it.packet.id}")
             }
         }
+        sendClaim(claimRecord)
         sendAck(record)
         return accepted
+    }
+
+    private fun retryClaim(incidentId: String) {
+        claimRecords[incidentId]?.let(::sendClaim)
+    }
+
+    private fun sendClaim(record: ClaimRecord) {
+        if (!hasOutgoingScanPermission()) {
+            claimRecords[record.packet.incidentId] = record.copy(state = AckSendState.FAILED, failureReason = "Bluetooth scan permission required")
+            return
+        }
+        meshSender.send(record.packet)
     }
 
     private fun retryAck(incidentId: String) {

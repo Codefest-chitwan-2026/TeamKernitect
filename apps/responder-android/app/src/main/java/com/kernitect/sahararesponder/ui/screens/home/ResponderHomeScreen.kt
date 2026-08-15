@@ -11,6 +11,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.kernitect.sahararesponder.model.ResponderIncident
 import com.kernitect.sahararesponder.model.ResponderTeamProfile
+import com.kernitect.sahararesponder.model.IncidentClaim
+import com.kernitect.sahararesponder.model.IncidentOwnership
+import com.kernitect.sahararesponder.model.ownershipOf
 import com.kernitect.sahararesponder.ui.components.*
 
 private val activeStatuses = setOf("ACCEPTED", "ON_THE_WAY", "NEARBY", "ARRIVED")
@@ -23,6 +26,7 @@ fun ResponderHomeScreen(
     responderLocated: Boolean,
     onOpenMap: () -> Unit,
     teamProfile: ResponderTeamProfile,
+    claimsByIncident: Map<String, List<IncidentClaim>>,
     modifier: Modifier = Modifier,
 ) {
     val newest = incidents.sortedByDescending { it.receivedAt }
@@ -58,11 +62,19 @@ fun ResponderHomeScreen(
         } else {
             items(newest, key = { it.id }) { incident ->
                 Box(Modifier.padding(horizontal = 20.dp)) {
-                    CompactIncidentCard(incident) { onViewDetails(incident) }
+                    val ownership = ownershipOf(claimsByIncident[incident.id].orEmpty(), teamProfile.teamId)
+                    CompactIncidentCard(incident, assignmentLabel = ownership.label()) { onViewDetails(incident) }
                 }
             }
         }
     }
+}
+
+private fun IncidentOwnership.label() = when (this) {
+    IncidentOwnership.UNCLAIMED -> "Unclaimed"
+    IncidentOwnership.CLAIMED_BY_ME -> "Claimed by your team"
+    IncidentOwnership.CLAIMED_BY_OTHER -> "Claimed by another team"
+    IncidentOwnership.CONFLICT -> "Claim conflict"
 }
 
 @Composable

@@ -1,6 +1,7 @@
 package com.kernitect.sahararesponder.mesh
 
 import com.kernitect.sahararesponder.model.RescueAckPacket
+import com.kernitect.sahararesponder.model.RescueClaimPacket
 
 enum class AckSendState(val message: String) {
     IDLE("Acknowledgement ready"),
@@ -13,6 +14,12 @@ enum class AckSendState(val message: String) {
 
 data class AckRecord(
     val packet: RescueAckPacket,
+    val state: AckSendState = AckSendState.IDLE,
+    val failureReason: String? = null,
+)
+
+data class ClaimRecord(
+    val packet: RescueClaimPacket,
     val state: AckSendState = AckSendState.IDLE,
     val failureReason: String? = null,
 )

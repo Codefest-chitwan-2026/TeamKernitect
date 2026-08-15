@@ -6,14 +6,15 @@ import android.os.Looper
 import android.util.Log
 import com.kernitect.sahararesponder.ble.ResponderBleScanner
 import com.kernitect.sahararesponder.ble.ResponderGattClient
-import com.kernitect.sahararesponder.model.RescueAckPacket
+import com.kernitect.sahararesponder.model.MeshOutgoingPacket
 
 class ResponderMeshSender(
     context: Context,
-    private val onStateChanged: (incidentId: String, state: AckSendState, failureReason: String?) -> Unit,
+    private val onStateChanged: (packet: MeshOutgoingPacket, state: AckSendState, failureReason: String?) -> Unit,
 ) {
     private val handler = Handler(Looper.getMainLooper())
-    private var pendingPacket: RescueAckPacket? = null
+    private var pendingPacket: MeshOutgoingPacket? = null
+    private val queue = ArrayDeque<MeshOutgoingPacket>()
     private val scanner = ResponderBleScanner(
         context = context.applicationContext,
         onDeviceFound = { device ->
@@ -34,13 +35,20 @@ class ResponderMeshSender(
             val packet = pendingPacket ?: return@ResponderGattClient
             update(packet, AckSendState.SENT_TO_MESH)
             pendingPacket = null
+            startNext()
         },
         onFailure = { fail(it) },
     )
     private val scanTimeout = Runnable { fail("No nearby Android RESCUEMESH relay found") }
 
-    fun send(packet: RescueAckPacket) {
-        cancelTransport()
+    fun send(packet: MeshOutgoingPacket) {
+        if (pendingPacket?.id == packet.id || queue.any { it.id == packet.id }) return
+        queue.addLast(packet)
+        if (pendingPacket == null) startNext()
+    }
+
+    private fun startNext() {
+        val packet = queue.removeFirstOrNull() ?: return
         pendingPacket = packet
         Log.i(TAG, "Searching for RESCUEMESH relay")
         update(packet, AckSendState.SEARCHING)
@@ -54,10 +62,11 @@ class ResponderMeshSender(
         handler.removeCallbacks(scanTimeout)
         update(packet, AckSendState.FAILED, reason)
         pendingPacket = null
+        startNext()
     }
 
-    private fun update(packet: RescueAckPacket, state: AckSendState, reason: String? = null) {
-        handler.post { onStateChanged(packet.incidentId, state, reason) }
+    private fun update(packet: MeshOutgoingPacket, state: AckSendState, reason: String? = null) {
+        handler.post { onStateChanged(packet, state, reason) }
     }
 
     private fun cancelTransport() {
@@ -65,6 +74,7 @@ class ResponderMeshSender(
         gattClient.close()
         handler.removeCallbacks(scanTimeout)
         pendingPacket = null
+        queue.clear()
     }
 
     fun close() = cancelTransport()
