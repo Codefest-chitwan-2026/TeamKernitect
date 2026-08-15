@@ -1,693 +1,694 @@
 package com.kernitect.saharaandroid
 
-import android.bluetooth.BluetoothAdapter
-import android.content.Intent
 import android.os.Bundle
-import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import com.kernitect.saharaandroid.ble.AppRequirements
 import com.kernitect.saharaandroid.location.LocationProvider
 import com.kernitect.saharaandroid.mesh.MeshEngine
-import com.kernitect.saharaandroid.model.RescuePacket
+import com.kernitect.saharaandroid.ui.SaharaApp
+import com.kernitect.saharaandroid.ui.components.SendProgressDialog
+import com.kernitect.saharaandroid.ui.components.SendProgressState
 import com.kernitect.saharaandroid.ui.theme.SaharaAndroidTheme
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.mutableStateListOf
+import com.kernitect.saharaandroid.model.ReceivedAlert
+import android.preference.PreferenceManager
+import org.osmdroid.config.Configuration
 
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(
         savedInstanceState: Bundle?
     ) {
+        super.onCreate(savedInstanceState)
 
-        super.onCreate(
-            savedInstanceState
+        Configuration.getInstance().load(
+            applicationContext,
+            PreferenceManager.getDefaultSharedPreferences(
+                applicationContext
+            )
         )
+
+        Configuration.getInstance().userAgentValue =
+            packageName
 
         setContent {
 
             SaharaAndroidTheme {
 
-                Surface(
-                    modifier =
-                        Modifier.fillMaxSize()
-                ) {
-
-                    SaharaScreen()
+                var status by remember {
+                    mutableStateOf("Starting...")
                 }
-            }
-        }
-    }
-}
 
-@Composable
-fun SaharaScreen() {
-
-    val context =
-        LocalContext.current
-
-    var refreshKey by remember {
-        mutableIntStateOf(0)
-    }
-
-    var meshStatus by remember {
-
-        mutableStateOf(
-            "Waiting for device readiness"
-        )
-    }
-
-    var locationStatus by remember {
-
-        mutableStateOf(
-            "Location not requested"
-        )
-    }
-
-    var latitude by remember {
-        mutableStateOf<Double?>(null)
-    }
-
-    var longitude by remember {
-        mutableStateOf<Double?>(null)
-    }
-
-    var locationAccuracy by remember {
-        mutableStateOf<Float?>(null)
-    }
-
-    var lastSentPacket by remember {
-
-        mutableStateOf<RescuePacket?>(
-            null
-        )
-    }
-
-    var lastReceivedPacket by remember {
-
-        mutableStateOf<RescuePacket?>(
-            null
-        )
-    }
-
-    var isGettingLocation by remember {
-        mutableStateOf(false)
-    }
-
-    val locationProvider =
-        remember {
-
-            LocationProvider(
-                context.applicationContext
-            )
-        }
-
-    val meshEngine =
-        remember {
-
-            MeshEngine(
-                context =
-                    context.applicationContext,
-
-                onStatusChanged = {
-                    meshStatus = it
-                },
-
-                onPacketReceived = {
-                    lastReceivedPacket = it
-                },
-
-                onPacketSent = {
-                    lastSentPacket = it
+                var gettingLocation by remember {
+                    mutableStateOf(false)
                 }
-            )
-        }
 
-    DisposableEffect(Unit) {
+                /*
+                 * All SOS/help packets this phone
+                 * has received from another mesh node.
+                 */
+                val receivedAlerts =
+                    remember {
+                        mutableStateListOf<ReceivedAlert>()
+                    }
 
-        onDispose {
+                /*
+                 * IDs that haven't been viewed
+                 * through the bell screen yet.
+                 */
+                val unreadAlertIds =
+                    remember {
+                        mutableStateListOf<String>()
+                    }
 
-            meshEngine.stop()
-        }
-    }
+                var activeIncomingAlert by remember {
+                    mutableStateOf<ReceivedAlert?>(
+                        null
+                    )
+                }
 
-    val permissionLauncher =
-        rememberLauncherForActivityResult(
-            contract =
-                ActivityResultContracts
-                    .RequestMultiplePermissions()
-        ) {
+                /*
+                 * Progress popup state.
+                 */
+                var sendDialogVisible by remember {
+                    mutableStateOf(false)
+                }
 
-            refreshKey++
-        }
+                var sendProgressState by remember {
+                    mutableStateOf(
+                        SendProgressState.LOCATING
+                    )
+                }
 
-    val bluetoothLauncher =
-        rememberLauncherForActivityResult(
-            contract =
-                ActivityResultContracts
-                    .StartActivityForResult()
-        ) {
+                var sendProgressMessage by remember {
+                    mutableStateOf("")
+                }
 
-            refreshKey++
-        }
+                var activeRequestIsCritical by remember {
+                    mutableStateOf(true)
+                }
 
-    val locationSettingsLauncher =
-        rememberLauncherForActivityResult(
-            contract =
-                ActivityResultContracts
-                    .StartActivityForResult()
-        ) {
+                /*
+                 * Every new request gets a generation number.
+                 *
+                 * Cancelling increments this number so an old
+                 * GPS callback cannot accidentally send later.
+                 */
+                var requestGeneration by remember {
+                    mutableStateOf(0)
+                }
 
-            refreshKey++
-        }
-
-    @Suppress("UNUSED_VARIABLE")
-    val currentRefreshKey =
-        refreshKey
-
-    val supportsBle =
-        AppRequirements
-            .supportsBle(context)
-
-    val permissionsGranted =
-        AppRequirements
-            .hasAllRuntimePermissions(
-                context
-            )
-
-    val preciseLocationGranted =
-        AppRequirements
-            .hasPreciseLocationPermission(
-                context
-            )
-
-    val bluetoothEnabled =
-        AppRequirements
-            .isBluetoothEnabled(
-                context
-            )
-
-    val locationEnabled =
-        AppRequirements
-            .isLocationEnabled(
-                context
-            )
-
-    val ready =
-        supportsBle &&
-                permissionsGranted &&
-                preciseLocationGranted &&
-                bluetoothEnabled &&
-                locationEnabled
-
-    /*
-     * As soon as the device is ready, Sahara becomes
-     * a RESCUEMESH receiver/relay automatically.
-     */
-    LaunchedEffect(ready) {
-
-        if (ready) {
-
-            meshEngine.start()
-        }
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(
-                rememberScrollState()
-            )
-            .padding(24.dp),
-
-        verticalArrangement =
-            Arrangement.Top
-    ) {
-
-        Spacer(
-            modifier =
-                Modifier.height(24.dp)
-        )
-
-        Text(
-            text = "SAHARA",
-
-            style =
-                MaterialTheme
-                    .typography
-                    .headlineLarge
-        )
-
-        Text(
-            text =
-                "RESCUEMESH",
-
-            style =
-                MaterialTheme
-                    .typography
-                    .titleMedium
-        )
-
-        Spacer(
-            modifier =
-                Modifier.height(20.dp)
-        )
-
-        RequirementRow(
-            "BLE supported",
-            supportsBle
-        )
-
-        RequirementRow(
-            "Permissions granted",
-            permissionsGranted
-        )
-
-        RequirementRow(
-            "Precise location",
-            preciseLocationGranted
-        )
-
-        RequirementRow(
-            "Bluetooth enabled",
-            bluetoothEnabled
-        )
-
-        RequirementRow(
-            "Location enabled",
-            locationEnabled
-        )
-
-        Spacer(
-            modifier =
-                Modifier.height(16.dp)
-        )
-
-        if (!permissionsGranted) {
-
-            Button(
-                onClick = {
-
-                    permissionLauncher.launch(
+                var permissionsGranted by remember {
+                    mutableStateOf(
                         AppRequirements
-                            .requiredRuntimePermissions()
+                            .hasAllRuntimePermissions(
+                                this@MainActivity
+                            )
                     )
-                },
-
-                modifier =
-                    Modifier.fillMaxWidth()
-            ) {
-
-                Text(
-                    "Grant Permissions"
-                )
-            }
-
-            Spacer(
-                modifier =
-                    Modifier.height(8.dp)
-            )
-        }
-
-        if (!bluetoothEnabled) {
-
-            Button(
-                onClick = {
-
-                    bluetoothLauncher.launch(
-                        Intent(
-                            BluetoothAdapter
-                                .ACTION_REQUEST_ENABLE
-                        )
-                    )
-                },
-
-                enabled =
-                    permissionsGranted,
-
-                modifier =
-                    Modifier.fillMaxWidth()
-            ) {
-
-                Text(
-                    "Enable Bluetooth"
-                )
-            }
-
-            Spacer(
-                modifier =
-                    Modifier.height(8.dp)
-            )
-        }
-
-        if (!locationEnabled) {
-
-            Button(
-                onClick = {
-
-                    locationSettingsLauncher.launch(
-                        Intent(
-                            Settings
-                                .ACTION_LOCATION_SOURCE_SETTINGS
-                        )
-                    )
-                },
-
-                modifier =
-                    Modifier.fillMaxWidth()
-            ) {
-
-                Text(
-                    "Enable Location"
-                )
-            }
-        }
-
-        if (!ready) {
-
-            Spacer(
-                modifier =
-                    Modifier.height(16.dp)
-            )
-
-            Text(
-                "Complete device setup before sending SOS."
-            )
-
-            return@Column
-        }
-
-        Spacer(
-            modifier =
-                Modifier.height(24.dp)
-        )
-
-        Text(
-            text = "Mesh Status",
-
-            style =
-                MaterialTheme
-                    .typography
-                    .titleMedium
-        )
-
-        Text(
-            text =
-                meshStatus
-        )
-
-        Spacer(
-            modifier =
-                Modifier.height(28.dp)
-        )
-
-        Button(
-            onClick = {
-
-                if (isGettingLocation) {
-                    return@Button
                 }
 
-                isGettingLocation =
-                    true
+                val locationProvider =
+                    remember {
 
-                locationStatus =
-                    "Getting accurate GPS location..."
+                        LocationProvider(
+                            context =
+                                this@MainActivity
+                        )
+                    }
 
-                locationProvider
-                    .getCurrentLocation(
+                val meshEngine =
+                    remember {
 
-                        onSuccess = {
-                                location ->
+                        MeshEngine(
+                            context =
+                                this@MainActivity,
 
-                            latitude =
-                                location.latitude
+                            onStatusChanged = {
+                                    newStatus ->
 
-                            longitude =
-                                location.longitude
+                                status =
+                                    newStatus
 
-                            locationAccuracy =
-                                location.accuracy
+                                /*
+                                 * Convert technical mesh status
+                                 * into simple user-facing progress.
+                                 */
+                                if (sendDialogVisible) {
 
-                            locationStatus =
-                                "Location captured"
+                                    when {
 
-                            val packet =
-                                meshEngine
-                                    .originateSos(
-                                        latitude =
-                                            location.latitude,
+                                        newStatus.contains(
+                                            "Looking for nearby Android relay",
+                                            ignoreCase = true
+                                        ) -> {
 
-                                        longitude =
-                                            location.longitude
+                                            sendProgressState =
+                                                SendProgressState.SEARCHING
+
+                                            sendProgressMessage =
+                                                "Finding a nearby rescue mesh device..."
+                                        }
+
+                                        newStatus.contains(
+                                            "Looking for RESCUEMESH gateway",
+                                            ignoreCase = true
+                                        ) -> {
+
+                                            sendProgressState =
+                                                SendProgressState.SEARCHING
+
+                                            sendProgressMessage =
+                                                "Looking for a gateway..."
+                                        }
+
+                                        newStatus.contains(
+                                            "found. Sending hop",
+                                            ignoreCase = true
+                                        ) -> {
+
+                                            /*
+                                             * From here cancellation is hidden.
+                                             */
+                                            sendProgressState =
+                                                SendProgressState.SENDING
+
+                                            sendProgressMessage =
+                                                if (activeRequestIsCritical) {
+                                                    "Sending critical SOS..."
+                                                } else {
+                                                    "Sending help request..."
+                                                }
+                                        }
+
+                                        newStatus.contains(
+                                            "No next relay found",
+                                            ignoreCase = true
+                                        ) -> {
+
+                                            sendProgressState =
+                                                SendProgressState.ERROR
+
+                                            sendProgressMessage =
+                                                "No nearby relay or gateway was found."
+                                        }
+                                    }
+                                }
+                            },
+
+                            onPacketReceived = {
+                                    packet ->
+
+                                status =
+                                    "${packet.priority} request received - " +
+                                            "Hop ${packet.hopCount}/${packet.ttl}"
+
+                                val alert =
+                                    ReceivedAlert(
+                                        packet = packet
                                     )
 
-                            lastSentPacket =
-                                packet
+                                /*
+                                 * Permanent in-app notification list.
+                                 */
+                                receivedAlerts.add(
+                                    index = 0,
+                                    element = alert
+                                )
 
-                            isGettingLocation =
+                                /*
+                                 * Unread bell counter.
+                                 */
+                                if (
+                                    !unreadAlertIds.contains(
+                                        packet.id
+                                    )
+                                ) {
+                                    unreadAlertIds.add(
+                                        packet.id
+                                    )
+                                }
+
+                                /*
+                                 * Temporary heads-up banner.
+                                 */
+                                activeIncomingAlert =
+                                    alert
+                            },
+
+                            onPacketSent = {
+                                    packet ->
+
+                                status =
+                                    "${packet.priority} request sent - " +
+                                            "Hop ${packet.hopCount}/${packet.ttl}"
+
+                                if (sendDialogVisible) {
+
+                                    sendProgressState =
+                                        SendProgressState.SUCCESS
+
+                                    sendProgressMessage =
+                                        if (packet.priority ==
+                                            "CRITICAL"
+                                        ) {
+                                            "SOS sent successfully."
+                                        } else {
+                                            "Help request sent successfully."
+                                        }
+                                }
+                            }
+                        )
+                    }
+
+                val permissionLauncher =
+                    rememberLauncherForActivityResult(
+                        contract =
+                            ActivityResultContracts
+                                .RequestMultiplePermissions()
+                    ) {
+
+                        permissionsGranted =
+                            AppRequirements
+                                .hasAllRuntimePermissions(
+                                    this@MainActivity
+                                )
+                    }
+
+                /*
+                 * Permissions.
+                 */
+                LaunchedEffect(Unit) {
+
+                    if (!permissionsGranted) {
+
+                        permissionLauncher.launch(
+                            AppRequirements
+                                .requiredRuntimePermissions()
+                        )
+                    }
+                }
+
+                /*
+                 * Start mesh.
+                 */
+                LaunchedEffect(
+                    permissionsGranted
+                ) {
+
+                    if (permissionsGranted) {
+
+                        if (
+                            !AppRequirements
+                                .hasPreciseLocation(
+                                    this@MainActivity
+                                )
+                        ) {
+
+                            status =
+                                "Precise location permission required"
+
+                        } else if (
+                            !AppRequirements
+                                .isLocationServicesEnabled(
+                                    this@MainActivity
+                                )
+                        ) {
+
+                            status =
+                                "Turn on Location services"
+
+                        } else {
+
+                            meshEngine.start()
+                        }
+
+                    } else {
+
+                        status =
+                            "Waiting for permissions..."
+                    }
+                }
+
+                /*
+                 * Briefly show success, then close automatically.
+                 */
+                LaunchedEffect(
+                    sendProgressState,
+                    sendDialogVisible
+                ) {
+
+                    if (
+                        sendDialogVisible &&
+                        sendProgressState ==
+                        SendProgressState.SUCCESS
+                    ) {
+
+                        delay(
+                            1500
+                        )
+
+                        sendDialogVisible =
+                            false
+                    }
+                }
+
+                DisposableEffect(Unit) {
+
+                    onDispose {
+
+                        meshEngine.stop()
+                    }
+                }
+
+                SaharaApp(
+
+                    receivedAlerts =
+                        receivedAlerts,
+
+                    unreadNotificationCount =
+                        unreadAlertIds.size,
+
+                    incomingAlert =
+                        activeIncomingAlert,
+
+                    onIncomingAlertDismissed = {
+                        activeIncomingAlert =
+                            null
+                    },
+
+                    onNotificationsOpened = {
+
+                        unreadAlertIds.clear()
+                    },
+
+                    /*
+                     * =============================
+                     * CRITICAL SOS
+                     * =============================
+                     */
+                    onCriticalSos = {
+
+                        if (
+                            !sendDialogVisible &&
+                            !gettingLocation
+                        ) {
+
+                            if (!permissionsGranted) {
+
+                                status =
+                                    "Required permissions not granted"
+
+                            } else if (
+                                !AppRequirements
+                                    .hasPreciseLocation(
+                                        this@MainActivity
+                                    )
+                            ) {
+
+                                status =
+                                    "Precise location permission required"
+
+                            } else if (
+                                !AppRequirements
+                                    .isLocationServicesEnabled(
+                                        this@MainActivity
+                                    )
+                            ) {
+
+                                status =
+                                    "Turn on Location services"
+
+                            } else {
+
+                                /*
+                                 * Start a new request generation.
+                                 */
+                                requestGeneration += 1
+
+                                val thisRequest =
+                                    requestGeneration
+
+                                activeRequestIsCritical =
+                                    true
+
+                                gettingLocation =
+                                    true
+
+                                sendDialogVisible =
+                                    true
+
+                                sendProgressState =
+                                    SendProgressState.LOCATING
+
+                                sendProgressMessage =
+                                    "Getting your location..."
+
+                                locationProvider
+                                    .getCurrentLocation(
+
+                                        onSuccess = {
+                                                location ->
+
+                                            /*
+                                             * Ignore this result if
+                                             * the user cancelled.
+                                             */
+                                            if (
+                                                thisRequest ==
+                                                requestGeneration
+                                            ) {
+
+                                                gettingLocation =
+                                                    false
+
+                                                sendProgressState =
+                                                    SendProgressState.SEARCHING
+
+                                                sendProgressMessage =
+                                                    "Finding a nearby rescue mesh device..."
+
+                                                meshEngine
+                                                    .originateSos(
+                                                        latitude =
+                                                            location.latitude,
+
+                                                        longitude =
+                                                            location.longitude
+                                                    )
+                                            }
+                                        },
+
+                                        onError = {
+                                                error ->
+
+                                            if (
+                                                thisRequest ==
+                                                requestGeneration
+                                            ) {
+
+                                                gettingLocation =
+                                                    false
+
+                                                sendProgressState =
+                                                    SendProgressState.ERROR
+
+                                                sendProgressMessage =
+                                                    error
+                                            }
+                                        }
+                                    )
+                            }
+                        }
+                    },
+
+                    /*
+                     * =============================
+                     * NORMAL HELP REQUEST
+                     * =============================
+                     */
+                    onNonEmergencyRequest = {
+                            disasterType,
+                            peopleCount,
+                            explanation ->
+
+                        if (
+                            !sendDialogVisible &&
+                            !gettingLocation
+                        ) {
+
+                            if (!permissionsGranted) {
+
+                                status =
+                                    "Required permissions not granted"
+
+                            } else if (
+                                !AppRequirements
+                                    .hasPreciseLocation(
+                                        this@MainActivity
+                                    )
+                            ) {
+
+                                status =
+                                    "Precise location permission required"
+
+                            } else if (
+                                !AppRequirements
+                                    .isLocationServicesEnabled(
+                                        this@MainActivity
+                                    )
+                            ) {
+
+                                status =
+                                    "Turn on Location services"
+
+                            } else {
+
+                                requestGeneration += 1
+
+                                val thisRequest =
+                                    requestGeneration
+
+                                activeRequestIsCritical =
+                                    false
+
+                                gettingLocation =
+                                    true
+
+                                sendDialogVisible =
+                                    true
+
+                                sendProgressState =
+                                    SendProgressState.LOCATING
+
+                                sendProgressMessage =
+                                    "Getting your location..."
+
+                                locationProvider
+                                    .getCurrentLocation(
+
+                                        onSuccess = {
+                                                location ->
+
+                                            if (
+                                                thisRequest ==
+                                                requestGeneration
+                                            ) {
+
+                                                gettingLocation =
+                                                    false
+
+                                                sendProgressState =
+                                                    SendProgressState.SEARCHING
+
+                                                sendProgressMessage =
+                                                    "Finding a nearby rescue mesh device..."
+
+                                                meshEngine
+                                                    .originateHelpRequest(
+                                                        latitude =
+                                                            location.latitude,
+
+                                                        longitude =
+                                                            location.longitude,
+
+                                                        disasterType =
+                                                            disasterType,
+
+                                                        peopleCount =
+                                                            peopleCount,
+
+                                                        explanation =
+                                                            explanation
+                                                    )
+                                            }
+                                        },
+
+                                        onError = {
+                                                error ->
+
+                                            if (
+                                                thisRequest ==
+                                                requestGeneration
+                                            ) {
+
+                                                gettingLocation =
+                                                    false
+
+                                                sendProgressState =
+                                                    SendProgressState.ERROR
+
+                                                sendProgressMessage =
+                                                    error
+                                            }
+                                        }
+                                    )
+                            }
+                        }
+                    }
+                )
+
+                /*
+                 * Progress popup sits above the entire app.
+                 */
+                if (sendDialogVisible) {
+
+                    SendProgressDialog(
+                        title =
+                            if (activeRequestIsCritical) {
+                                "Emergency SOS"
+                            } else {
+                                "Help Request"
+                            },
+
+                        message =
+                            sendProgressMessage,
+
+                        state =
+                            sendProgressState,
+
+                        onCancel = {
+
+                            /*
+                             * Invalidate any unfinished
+                             * GPS callback.
+                             */
+                            requestGeneration += 1
+
+                            gettingLocation =
+                                false
+
+                            /*
+                             * Stop scanning / drop the
+                             * pending mesh packet.
+                             */
+                            meshEngine
+                                .cancelPendingForward()
+
+                            status =
+                                "Request cancelled"
+
+                            sendDialogVisible =
                                 false
                         },
 
-                        onError = {
-                                error ->
+                        onClose = {
 
-                            locationStatus =
-                                error
-
-                            isGettingLocation =
+                            sendDialogVisible =
                                 false
                         }
                     )
-            },
-
-            enabled =
-                !isGettingLocation,
-
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(80.dp)
-        ) {
-
-            Text(
-                text =
-                    if (isGettingLocation) {
-                        "GETTING LOCATION..."
-                    } else {
-                        "SEND SOS"
-                    },
-
-                style =
-                    MaterialTheme
-                        .typography
-                        .titleLarge
-            )
+                }
+            }
         }
-
-        Spacer(
-            modifier =
-                Modifier.height(16.dp)
-        )
-
-        Text(
-            text =
-                "Location: $locationStatus"
-        )
-
-        latitude?.let {
-
-            Text(
-                text =
-                    "Latitude: $it"
-            )
-        }
-
-        longitude?.let {
-
-            Text(
-                text =
-                    "Longitude: $it"
-            )
-        }
-
-        locationAccuracy?.let {
-
-            Text(
-                text =
-                    "Accuracy: ${it.toInt()} meters"
-            )
-        }
-
-        Spacer(
-            modifier =
-                Modifier.height(24.dp)
-        )
-
-        lastSentPacket?.let { packet ->
-
-            Text(
-                text =
-                    "Latest Outgoing SOS",
-
-                style =
-                    MaterialTheme
-                        .typography
-                        .titleMedium
-            )
-
-            PacketDetails(
-                packet = packet
-            )
-
-            Spacer(
-                modifier =
-                    Modifier.height(20.dp)
-            )
-        }
-
-        lastReceivedPacket?.let { packet ->
-
-            Text(
-                text =
-                    "Latest Received SOS",
-
-                style =
-                    MaterialTheme
-                        .typography
-                        .titleMedium
-            )
-
-            PacketDetails(
-                packet = packet
-            )
-
-            Spacer(
-                modifier =
-                    Modifier.height(20.dp)
-            )
-        }
-
-        /*
-         * Debug fallback.
-         *
-         * Useful if a relay scan timed out because
-         * the next device wasn't available yet.
-         */
-        Button(
-            onClick = {
-
-                meshEngine
-                    .retryPendingForward()
-            },
-
-            modifier =
-                Modifier.fillMaxWidth()
-        ) {
-
-            Text(
-                "Retry Pending Relay"
-            )
-        }
-
-        Spacer(
-            modifier =
-                Modifier.height(40.dp)
-        )
-    }
-}
-
-@Composable
-private fun PacketDetails(
-    packet: RescuePacket
-) {
-
-    Text(
-        text =
-            "ID: ${packet.id}"
-    )
-
-    Text(
-        text =
-            "Type: ${packet.type}"
-    )
-
-    Text(
-        text =
-            "Latitude: ${packet.latitude}"
-    )
-
-    Text(
-        text =
-            "Longitude: ${packet.longitude}"
-    )
-
-    Text(
-        text =
-            "Timestamp: ${packet.timestamp}"
-    )
-
-    Text(
-        text =
-            "Hop: ${packet.hopCount}/${packet.ttl}"
-    )
-}
-
-@Composable
-private fun RequirementRow(
-    name: String,
-    satisfied: Boolean
-) {
-
-    Row(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .padding(
-                    vertical = 4.dp
-                )
-    ) {
-
-        Text(
-            text =
-                if (satisfied) {
-                    "✓"
-                } else {
-                    "✗"
-                },
-
-            modifier =
-                Modifier.padding(
-                    end = 12.dp
-                )
-        )
-
-        Text(
-            text = name
-        )
     }
 }

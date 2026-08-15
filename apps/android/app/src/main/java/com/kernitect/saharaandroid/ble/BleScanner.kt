@@ -9,15 +9,33 @@ import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.ParcelUuid
+import android.util.Log
 
 class BleScanner(
     private val context: Context,
-    private val onDeviceFound: (
+
+    private val onDeviceFound:
+        (
         device: BluetoothDevice,
         rssi: Int
     ) -> Unit,
-    private val onStatusChanged: (String) -> Unit
+
+    private val onStatusChanged:
+        (String) -> Unit
 ) {
+
+    companion object {
+
+        private const val TAG =
+            "SAHARA_BLE"
+    }
+
+    enum class ScanTarget {
+
+        ANDROID_ONLY,
+
+        ANY_RESCUEMESH
+    }
 
     private val bluetoothManager =
         context.getSystemService(
@@ -25,44 +43,36 @@ class BleScanner(
         ) as BluetoothManager
 
     private val bluetoothAdapter
-        get() = bluetoothManager.adapter
+        get() =
+            bluetoothManager.adapter
 
-    private var scanning = false
+    private var scanning =
+        false
+
+    private var currentTarget:
+            ScanTarget? = null
 
     private val scanCallback =
         object : ScanCallback() {
 
-            @SuppressLint("MissingPermission")
             override fun onScanResult(
                 callbackType: Int,
                 result: ScanResult
             ) {
 
-                super.onScanResult(
-                    callbackType,
+                inspectResult(
                     result
-                )
-
-                onDeviceFound(
-                    result.device,
-                    result.rssi
                 )
             }
 
-            @SuppressLint("MissingPermission")
             override fun onBatchScanResults(
                 results: MutableList<ScanResult>
             ) {
 
-                super.onBatchScanResults(
-                    results
-                )
+                results.forEach {
 
-                results.forEach { result ->
-
-                    onDeviceFound(
-                        result.device,
-                        result.rssi
+                    inspectResult(
+                        it
                     )
                 }
             }
@@ -71,59 +81,107 @@ class BleScanner(
                 errorCode: Int
             ) {
 
-                scanning = false
+                scanning =
+                    false
 
-                val message =
-                    when (errorCode) {
+                currentTarget =
+                    null
 
-                        SCAN_FAILED_ALREADY_STARTED ->
-                            "Scan already started"
+                Log.e(
+                    TAG,
+                    "BLE scan failed: $errorCode"
+                )
 
-                        SCAN_FAILED_APPLICATION_REGISTRATION_FAILED ->
-                            "Scan failed: registration error"
-
-                        SCAN_FAILED_INTERNAL_ERROR ->
-                            "Scan failed: internal error"
-
-                        SCAN_FAILED_FEATURE_UNSUPPORTED ->
-                            "Scan failed: unsupported"
-
-                        else ->
-                            "Scan failed: error $errorCode"
-                    }
-
-                onStatusChanged(message)
+                onStatusChanged(
+                    "BLE scan failed: $errorCode"
+                )
             }
         }
 
     @SuppressLint("MissingPermission")
-    fun startScanning() {
+    private fun inspectResult(
+        result: ScanResult
+    ) {
+
+        val target =
+            currentTarget
+                ?: return
+
+        val serviceUuids =
+            result.scanRecord
+                ?.serviceUuids
+                ?.map {
+                    it.uuid
+                }
+                ?: emptyList()
+
+        val isAndroidNode =
+            serviceUuids.contains(
+                BleConstants.ANDROID_NODE_UUID
+            )
+
+        Log.d(
+            TAG,
+            "Scan address=${result.device.address} " +
+                    "rssi=${result.rssi} " +
+                    "androidNode=$isAndroidNode " +
+                    "target=$target"
+        )
+
+        /*
+         * During phase 1 Windows is ignored.
+         */
+        if (
+            target ==
+            ScanTarget.ANDROID_ONLY &&
+            !isAndroidNode
+        ) {
+
+            return
+        }
+
+        onDeviceFound(
+            result.device,
+            result.rssi
+        )
+    }
+
+    @SuppressLint("MissingPermission")
+    fun startScanning(
+        target: ScanTarget
+    ) {
 
         if (
             !AppRequirements
-                .hasAllRuntimePermissions(context)
+                .hasAllRuntimePermissions(
+                    context
+                )
         ) {
+
             onStatusChanged(
                 "Scan failed: missing permissions"
             )
+
             return
         }
 
         if (
             !AppRequirements
-                .isBluetoothEnabled(context)
+                .isBluetoothEnabled(
+                    context
+                )
         ) {
+
             onStatusChanged(
                 "Scan failed: Bluetooth is off"
             )
+
             return
         }
 
         if (scanning) {
-            onStatusChanged(
-                "Already scanning"
-            )
-            return
+
+            stopScanning()
         }
 
         val scanner =
@@ -131,12 +189,17 @@ class BleScanner(
                 ?.bluetoothLeScanner
 
         if (scanner == null) {
+
             onStatusChanged(
-                "Scan failed: BLE scanner unavailable"
+                "BLE scanner unavailable"
             )
+
             return
         }
 
+        /*
+         * Both Android and Windows expose SERVICE_UUID.
+         */
         val filter =
             ScanFilter.Builder()
                 .setServiceUuid(
@@ -149,34 +212,85 @@ class BleScanner(
         val settings =
             ScanSettings.Builder()
                 .setScanMode(
-                    ScanSettings.SCAN_MODE_LOW_LATENCY
+                    ScanSettings
+                        .SCAN_MODE_LOW_LATENCY
                 )
                 .build()
 
-        scanning = true
+        currentTarget =
+            target
 
-        scanner.startScan(
-            listOf(filter),
-            settings,
-            scanCallback
-        )
+        scanning =
+            true
 
-        onStatusChanged(
-            "Scanning for RESCUEMESH devices..."
-        )
+        try {
+
+            scanner.startScan(
+                listOf(filter),
+                settings,
+                scanCallback
+            )
+
+        } catch (_: SecurityException) {
+
+            scanning =
+                false
+
+            currentTarget =
+                null
+
+            onStatusChanged(
+                "BLE scan permission error"
+            )
+
+            return
+        }
+
+        when (target) {
+
+            ScanTarget.ANDROID_ONLY ->
+
+                onStatusChanged(
+                    "Scanning for Android relay nodes..."
+                )
+
+            ScanTarget.ANY_RESCUEMESH ->
+
+                onStatusChanged(
+                    "Scanning for RESCUEMESH gateway..."
+                )
+        }
     }
 
     @SuppressLint("MissingPermission")
     fun stopScanning() {
 
-        bluetoothAdapter
-            ?.bluetoothLeScanner
-            ?.stopScan(scanCallback)
+        if (!scanning) {
+            return
+        }
 
-        scanning = false
+        try {
 
-        onStatusChanged(
-            "Scanning stopped"
+            bluetoothAdapter
+                ?.bluetoothLeScanner
+                ?.stopScan(
+                    scanCallback
+                )
+
+        } catch (_: SecurityException) {
+
+            // Cleanup only.
+        }
+
+        scanning =
+            false
+
+        currentTarget =
+            null
+
+        Log.d(
+            TAG,
+            "BLE scan stopped"
         )
     }
 }

@@ -10,7 +10,6 @@ import android.bluetooth.BluetoothGattServer
 import android.bluetooth.BluetoothGattServerCallback
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothManager
-import android.bluetooth.BluetoothProfile
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
@@ -19,14 +18,17 @@ import androidx.core.content.ContextCompat
 class BleGattServer(
     private val context: Context,
 
-    private val onMessageReceived: (
+    private val onMessageReceived:
+        (
         device: BluetoothDevice,
         message: String
     ) -> Unit,
 
-    private val onStatusChanged: (String) -> Unit,
+    private val onStatusChanged:
+        (String) -> Unit,
 
-    private val onReady: (() -> Unit)? = null
+    private val onReady:
+        () -> Unit
 ) {
 
     private val bluetoothManager =
@@ -37,13 +39,20 @@ class BleGattServer(
     private var gattServer:
             BluetoothGattServer? = null
 
-    private val gattServerCallback =
+    private val callback =
         object : BluetoothGattServerCallback() {
 
             override fun onServiceAdded(
                 status: Int,
                 service: BluetoothGattService
             ) {
+
+                if (
+                    service.uuid !=
+                    BleConstants.SERVICE_UUID
+                ) {
+                    return
+                }
 
                 if (
                     status ==
@@ -54,12 +63,12 @@ class BleGattServer(
                         "GATT service ready"
                     )
 
-                    onReady?.invoke()
+                    onReady()
 
                 } else {
 
                     onStatusChanged(
-                        "Failed to add GATT service: $status"
+                        "GATT service creation failed: $status"
                     )
                 }
             }
@@ -70,22 +79,9 @@ class BleGattServer(
                 newState: Int
             ) {
 
-                when (newState) {
-
-                    BluetoothProfile.STATE_CONNECTED -> {
-
-                        onStatusChanged(
-                            "GATT client connected"
-                        )
-                    }
-
-                    BluetoothProfile.STATE_DISCONNECTED -> {
-
-                        onStatusChanged(
-                            "GATT client disconnected"
-                        )
-                    }
-                }
+                onStatusChanged(
+                    "GATT server connection state: $newState"
+                )
             }
 
             override fun onCharacteristicWriteRequest(
@@ -105,26 +101,7 @@ class BleGattServer(
 
                     if (responseNeeded) {
 
-                        sendResponseSafely(
-                            device = device,
-                            requestId = requestId,
-                            status =
-                                BluetoothGatt
-                                    .GATT_REQUEST_NOT_SUPPORTED
-                        )
-                    }
-
-                    return
-                }
-
-                if (
-                    preparedWrite ||
-                    offset != 0
-                ) {
-
-                    if (responseNeeded) {
-
-                        sendResponseSafely(
+                        sendResponse(
                             device = device,
                             requestId = requestId,
                             status =
@@ -148,53 +125,14 @@ class BleGattServer(
 
                 if (responseNeeded) {
 
-                    sendResponseSafely(
-                        device = device,
-                        requestId = requestId,
-                        status =
-                            BluetoothGatt.GATT_SUCCESS
-                    )
-                }
-
-                onStatusChanged(
-                    "Message received"
-                )
-            }
-
-            override fun onDescriptorReadRequest(
-                device: BluetoothDevice,
-                requestId: Int,
-                offset: Int,
-                descriptor: BluetoothGattDescriptor
-            ) {
-
-                if (
-                    descriptor.uuid !=
-                    BleConstants.CCCD_UUID
-                ) {
-
-                    sendResponseSafely(
+                    sendResponse(
                         device = device,
                         requestId = requestId,
                         status =
                             BluetoothGatt
-                                .GATT_REQUEST_NOT_SUPPORTED
+                                .GATT_SUCCESS
                     )
-
-                    return
                 }
-
-                sendResponseSafely(
-                    device = device,
-                    requestId = requestId,
-                    status =
-                        BluetoothGatt.GATT_SUCCESS,
-                    value =
-                        byteArrayOf(
-                            0x00,
-                            0x00
-                        )
-                )
             }
 
             override fun onDescriptorWriteRequest(
@@ -207,27 +145,36 @@ class BleGattServer(
                 value: ByteArray
             ) {
 
-                if (!responseNeeded) {
+                if (
+                    descriptor.uuid ==
+                    BleConstants.CCCD_UUID
+                ) {
+
+                    @Suppress("DEPRECATION")
+                    descriptor.value =
+                        value
+
+                    onStatusChanged(
+                        "Client enabled notifications"
+                    )
+
+                    if (responseNeeded) {
+
+                        sendResponse(
+                            device = device,
+                            requestId = requestId,
+                            status =
+                                BluetoothGatt
+                                    .GATT_SUCCESS
+                        )
+                    }
+
                     return
                 }
 
-                if (
-                    descriptor.uuid ==
-                    BleConstants.CCCD_UUID &&
-                    !preparedWrite &&
-                    offset == 0
-                ) {
+                if (responseNeeded) {
 
-                    sendResponseSafely(
-                        device = device,
-                        requestId = requestId,
-                        status =
-                            BluetoothGatt.GATT_SUCCESS
-                    )
-
-                } else {
-
-                    sendResponseSafely(
+                    sendResponse(
                         device = device,
                         requestId = requestId,
                         status =
@@ -238,49 +185,12 @@ class BleGattServer(
             }
         }
 
-    private fun hasBluetoothConnectPermission():
-            Boolean {
-
-        if (
-            Build.VERSION.SDK_INT <
-            Build.VERSION_CODES.S
-        ) {
-            return true
-        }
-
-        return ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.BLUETOOTH_CONNECT
-        ) == PackageManager.PERMISSION_GRANTED
-    }
-
     fun startServer() {
 
-        if (!hasBluetoothConnectPermission()) {
+        if (!hasConnectPermission()) {
 
             onStatusChanged(
-                "GATT server failed: Bluetooth permission missing"
-            )
-
-            return
-        }
-
-        if (
-            !AppRequirements
-                .isBluetoothEnabled(context)
-        ) {
-
-            onStatusChanged(
-                "GATT server failed: Bluetooth is off"
-            )
-
-            return
-        }
-
-        if (gattServer != null) {
-
-            onStatusChanged(
-                "GATT server already running"
+                "Cannot start GATT server: missing Bluetooth permission"
             )
 
             return
@@ -292,22 +202,36 @@ class BleGattServer(
     @SuppressLint("MissingPermission")
     private fun startServerWithPermission() {
 
+        if (
+            gattServer != null
+        ) {
+
+            onStatusChanged(
+                "GATT server already running"
+            )
+
+            return
+        }
+
         try {
 
             val server =
                 bluetoothManager.openGattServer(
                     context,
-                    gattServerCallback
+                    callback
                 )
 
             if (server == null) {
 
                 onStatusChanged(
-                    "Failed to open GATT server"
+                    "Could not open GATT server"
                 )
 
                 return
             }
+
+            gattServer =
+                server
 
             val service =
                 BluetoothGattService(
@@ -316,7 +240,7 @@ class BleGattServer(
                         .SERVICE_TYPE_PRIMARY
                 )
 
-            val messageCharacteristic =
+            val characteristic =
                 BluetoothGattCharacteristic(
                     BleConstants.MESSAGE_UUID,
 
@@ -331,7 +255,11 @@ class BleGattServer(
                         .PERMISSION_WRITE
                 )
 
-            val cccdDescriptor =
+            /*
+             * Android GATT server requires us to add
+             * the CCCD explicitly.
+             */
+            val cccd =
                 BluetoothGattDescriptor(
                     BleConstants.CCCD_UUID,
 
@@ -341,64 +269,32 @@ class BleGattServer(
                                 .PERMISSION_WRITE
                 )
 
-            if (
-                !messageCharacteristic
-                    .addDescriptor(
-                        cccdDescriptor
-                    )
-            ) {
-
-                onStatusChanged(
-                    "Failed to add CCCD descriptor"
-                )
-
-                server.close()
-
-                return
-            }
-
-            if (
-                !service.addCharacteristic(
-                    messageCharacteristic
-                )
-            ) {
-
-                onStatusChanged(
-                    "Failed to add MESSAGE characteristic"
-                )
-
-                server.close()
-
-                return
-            }
-
-            gattServer =
-                server
-
-            if (
-                !server.addService(
-                    service
-                )
-            ) {
-
-                onStatusChanged(
-                    "Failed to start GATT service"
-                )
-
-                server.close()
-
-                gattServer = null
-
-                return
-            }
-
-            onStatusChanged(
-                "Starting GATT server..."
+            characteristic.addDescriptor(
+                cccd
             )
 
-        } catch (_: SecurityException) {
+            service.addCharacteristic(
+                characteristic
+            )
 
-            gattServer = null
+            val added =
+                server.addService(
+                    service
+                )
+
+            if (!added) {
+
+                onStatusChanged(
+                    "Could not add RESCUEMESH GATT service"
+                )
+            } else {
+
+                onStatusChanged(
+                    "Creating RESCUEMESH GATT service..."
+                )
+            }
+
+        } catch (_: SecurityException) {
 
             onStatusChanged(
                 "GATT server permission error"
@@ -406,31 +302,11 @@ class BleGattServer(
         }
     }
 
-    private fun sendResponseSafely(
-        device: BluetoothDevice,
-        requestId: Int,
-        status: Int,
-        value: ByteArray? = null
-    ) {
-
-        if (!hasBluetoothConnectPermission()) {
-            return
-        }
-
-        sendResponseWithPermission(
-            device = device,
-            requestId = requestId,
-            status = status,
-            value = value
-        )
-    }
-
     @SuppressLint("MissingPermission")
-    private fun sendResponseWithPermission(
+    private fun sendResponse(
         device: BluetoothDevice,
         requestId: Int,
-        status: Int,
-        value: ByteArray?
+        status: Int
     ) {
 
         try {
@@ -440,49 +316,78 @@ class BleGattServer(
                 requestId,
                 status,
                 0,
-                value
+                null
             )
 
         } catch (_: SecurityException) {
 
             onStatusChanged(
-                "Unable to send GATT response"
+                "Could not send GATT response"
             )
         }
     }
 
     fun stopServer() {
 
-        if (gattServer == null) {
+        val server =
+            gattServer
+                ?: return
+
+        if (!hasConnectPermission()) {
+
+            gattServer =
+                null
+
             return
         }
 
-        if (!hasBluetoothConnectPermission()) {
-
-            gattServer = null
-
-            return
-        }
-
-        stopServerWithPermission()
+        stopServerWithPermission(
+            server
+        )
     }
 
     @SuppressLint("MissingPermission")
-    private fun stopServerWithPermission() {
+    private fun stopServerWithPermission(
+        server: BluetoothGattServer
+    ) {
 
         try {
 
-            gattServer?.clearServices()
-            gattServer?.close()
+            server.clearServices()
 
-        } catch (_: SecurityException) {
-            // Cleanup only.
+        } catch (_: Exception) {
         }
 
-        gattServer = null
+        try {
+
+            server.close()
+
+        } catch (_: Exception) {
+        }
+
+        gattServer =
+            null
 
         onStatusChanged(
             "GATT server stopped"
         )
+    }
+
+    private fun hasConnectPermission():
+            Boolean {
+
+        if (
+            Build.VERSION.SDK_INT <
+            Build.VERSION_CODES.S
+        ) {
+
+            return true
+        }
+
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.BLUETOOTH_CONNECT
+        ) ==
+                PackageManager.PERMISSION_GRANTED
     }
 }

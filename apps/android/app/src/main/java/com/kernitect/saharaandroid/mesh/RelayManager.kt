@@ -1,28 +1,47 @@
 package com.kernitect.saharaandroid.mesh
 
-class RelayManager(
-    private val maxRememberedPackets: Int = 200
-) {
-    private val seenPacketIds = LinkedHashSet<String>()
+class RelayManager {
+
+    companion object {
+
+        private const val MAX_SEEN_PACKETS =
+            200
+    }
+
+    private val seenPacketIds =
+        LinkedHashSet<String>()
 
     @Synchronized
     fun markSeen(
         packetId: String
     ): Boolean {
-        if (seenPacketIds.contains(packetId)) {
+
+        if (
+            seenPacketIds.contains(
+                packetId
+            )
+        ) {
+
             return false
         }
 
-        seenPacketIds.add(packetId)
+        seenPacketIds.add(
+            packetId
+        )
 
-        if (
-            seenPacketIds.size > maxRememberedPackets
+        while (
+            seenPacketIds.size >
+            MAX_SEEN_PACKETS
         ) {
-            val oldest = seenPacketIds.firstOrNull()
 
-            if (oldest != null) {
-                seenPacketIds.remove(oldest)
-            }
+            val oldest =
+                seenPacketIds
+                    .firstOrNull()
+                    ?: break
+
+            seenPacketIds.remove(
+                oldest
+            )
         }
 
         return true
@@ -30,16 +49,17 @@ class RelayManager(
 
     @Synchronized
     fun hasSeen(
-        packedId: String
+        packetId: String
     ): Boolean {
 
         return seenPacketIds.contains(
-            packedId
+            packetId
         )
     }
 
     @Synchronized
     fun clear() {
+
         seenPacketIds.clear()
     }
 }

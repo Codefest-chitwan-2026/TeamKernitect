@@ -1,31 +1,87 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Runtime.InteropServices.WindowsRuntime;
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Controls.Primitives;
-using Microsoft.UI.Xaml.Data;
-using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Navigation;
-using Windows.Foundation;
-using Windows.Foundation.Collections;
-
-// To learn more about WinUI, the WinUI project structure,
-// and more about our project templates, see: http://aka.ms/winui-project-info.
+using SaharaGateway.BleGateway;
+using SaharaGateway.Services;
 
 namespace SaharaGateway
 {
-    /// <summary>
-    /// An empty window that can be used on its own or navigated to within a Frame.
-    /// </summary>
     public sealed partial class MainWindow : Window
     {
+        private readonly BleServer _bleServer;
+
+        private readonly ApiClient _apiClient;
+
         public MainWindow()
         {
             InitializeComponent();
+
+            _bleServer =
+                new BleServer();
+
+            _apiClient =
+                new ApiClient();
+
+            _bleServer.StatusChanged +=
+                BleServer_StatusChanged;
+
+            _bleServer.MessageReceived +=
+                BleServer_MessageReceived;
+        }
+
+        private async void StartGateway_Click(
+            object sender,
+            RoutedEventArgs e
+        )
+        {
+            await _bleServer.StartAsync();
+        }
+
+        private void StopGateway_Click(
+            object sender,
+            RoutedEventArgs e
+        )
+        {
+            _bleServer.Stop();
+        }
+
+        private void BleServer_StatusChanged(
+            string status
+        )
+        {
+            DispatcherQueue.TryEnqueue(
+                () =>
+                {
+                    StatusText.Text =
+                        status;
+                }
+            );
+        }
+
+        private void BleServer_MessageReceived(
+            string message
+        )
+        {
+            DispatcherQueue.TryEnqueue(
+                async () =>
+                {
+                    StatusText.Text =
+                        "SOS RECEIVED OVER BLE";
+
+                    MessageTextBox.Text =
+                        message;
+
+                    ApiStatusText.Text =
+                        "Sending SOS to FastAPI...";
+
+                    var result =
+                        await _apiClient
+                            .SendSosAsync(
+                                message
+                            );
+
+                    ApiStatusText.Text =
+                        result;
+                }
+            );
         }
     }
 }
