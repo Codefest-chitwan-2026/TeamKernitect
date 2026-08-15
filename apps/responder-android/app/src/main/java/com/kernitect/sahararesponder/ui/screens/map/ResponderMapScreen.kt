@@ -8,6 +8,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -40,33 +41,64 @@ fun ResponderMapScreen(
 ) {
     var mapView by remember { mutableStateOf<MapView?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
-    val mapSetup by produceState<MapSetup?>(null, context) {
+    val activeIncidents = activeMapIncidents(incidents)
+    val visibleFocusedIncident = focusedIncident?.takeIf { it.status != "RESCUED" }
+    val coveragePoints = buildList {
+        activeIncidents.forEach { add(it.latitude to it.longitude) }
+        responderLocation?.let { add(it.latitude to it.longitude) }
+    }
+    val mapSetup by produceState<MapSetup?>(null, context, coveragePoints) {
         value = withContext(Dispatchers.IO) {
             val manager = ResponderOfflineMapManager(context.applicationContext)
             val archive = manager.prepareArchive()
-            MapSetup(selectMapMode(manager.hasNetwork(), archive != null), archive)
+            val coverage = archive?.let { manager.hasCoverage(it, coveragePoints) } ?: false
+            MapSetup(selectMapMode(manager.hasNetwork(), archive != null, coverage), archive)
         }
     }
-    val validIncidents = incidents.filter { RescueNavigationCalculator.isValidCoordinate(it.latitude, it.longitude) }
+    val validIncidents = activeIncidents.filter { RescueNavigationCalculator.isValidCoordinate(it.latitude, it.longitude) }
+    val recenterPoint = visibleFocusedIncident
+        ?.takeIf { RescueNavigationCalculator.isValidCoordinate(it.latitude, it.longitude) }
+        ?.let { GeoPoint(it.latitude, it.longitude) }
+        ?: validIncidents.maxByOrNull { it.receivedAt }?.let { GeoPoint(it.latitude, it.longitude) }
+        ?: responderLocation
+            ?.takeIf { RescueNavigationCalculator.isValidCoordinate(it.latitude, it.longitude) }
+            ?.let { GeoPoint(it.latitude, it.longitude) }
     val distance = focusedIncident?.let { responderLocation?.let { location -> RescueNavigationCalculator.distanceMeters(location, it.latitude, it.longitude) } }
     val bearing = focusedIncident?.let { responderLocation?.let { location -> RescueNavigationCalculator.bearingDegrees(location, it.latitude, it.longitude) } }
 
     Column(modifier.fillMaxSize()) {
         MapHeader(focused = focusedIncident != null, onBack = onBack)
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .clip(RoundedCornerShape(18.dp)),
+        ) {
             mapSetup?.let { setup -> ResponderMapView(
                 incidents = validIncidents,
                 responderLocation = responderLocation,
-                focusedIncident = focusedIncident,
+                focusedIncident = visibleFocusedIncident,
                 setup = setup,
                 onMapAvailable = { mapView = it },
             ) }
             MapModeBadge(mapSetup?.mode, Modifier.align(Alignment.TopEnd).padding(12.dp))
-            if (mapSetup?.mode == ResponderMapMode.OFFLINE_COVERAGE_UNAVAILABLE) {
+            FilledTonalButton(
+                onClick = {
+                    recenterPoint?.let {
+                        mapView?.controller?.animateTo(it)
+                        mapView?.controller?.setZoom(if (visibleFocusedIncident != null) 17.0 else 13.0)
+                    }
+                },
+                enabled = recenterPoint != null,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                modifier = Modifier.align(Alignment.TopStart).padding(12.dp),
+            ) { Text("RECENTER", style = MaterialTheme.typography.labelMedium) }
+            if (mapSetup?.mode in setOf(ResponderMapMode.OFFLINE_PACK_MISSING, ResponderMapMode.OFFLINE_COVERAGE_UNAVAILABLE)) {
                 Surface(Modifier.align(Alignment.Center).padding(24.dp), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)) {
                     Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("OFFLINE MAP", fontWeight = FontWeight.Bold)
-                        Text("Map tiles are unavailable for this area.")
+                        Text(if (mapSetup?.mode == ResponderMapMode.OFFLINE_PACK_MISSING) "Offline map pack is not installed." else "Offline map tiles are unavailable for this area.")
                         Text("GPS, victim location, distance and bearing remain available.", style = MaterialTheme.typography.bodySmall)
                     }
                 }
@@ -121,7 +153,7 @@ private data class MapSetup(val mode: ResponderMapMode, val archive: File?)
 
 @Composable private fun MapModeBadge(mode: ResponderMapMode?, modifier: Modifier) {
     Surface(modifier, shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f), shadowElevation = 2.dp) {
-        Text(when (mode) { ResponderMapMode.ONLINE -> "Online Map"; ResponderMapMode.OFFLINE -> "Offline Map"; ResponderMapMode.OFFLINE_COVERAGE_UNAVAILABLE -> "Offline coverage unavailable"; null -> "Preparing map…" }, Modifier.padding(horizontal = 10.dp, vertical = 6.dp), style = MaterialTheme.typography.labelMedium)
+        Text(when (mode) { ResponderMapMode.ONLINE -> "Online Map"; ResponderMapMode.OFFLINE -> "Offline Map"; ResponderMapMode.OFFLINE_PACK_MISSING -> "Offline pack not installed"; ResponderMapMode.OFFLINE_COVERAGE_UNAVAILABLE -> "Offline coverage unavailable"; null -> "Preparing map…" }, Modifier.padding(horizontal = 10.dp, vertical = 6.dp), style = MaterialTheme.typography.labelMedium)
     }
 }
 
@@ -177,7 +209,7 @@ private data class MapRuntimeState(val signature: String, val cameraInitialized:
 
 private fun updateMap(map: MapView, incidents: List<ResponderIncident>, responder: ResponderLocation?, focused: ResponderIncident?) {
     val allIncidents = incidents.toMutableList().apply {
-        if (focused != null && none { it.id == focused.id } && RescueNavigationCalculator.isValidCoordinate(focused.latitude, focused.longitude)) add(focused)
+        if (focused != null && focused.status != "RESCUED" && none { it.id == focused.id } && RescueNavigationCalculator.isValidCoordinate(focused.latitude, focused.longitude)) add(focused)
     }
     val signature = buildString {
         allIncidents.forEach { append("${it.id}:${it.latitude}:${it.longitude}:${it.priority}|") }

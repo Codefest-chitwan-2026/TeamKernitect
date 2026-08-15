@@ -42,7 +42,7 @@ fun formatLifecycleTime(timestamp: Long): String =
     SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(timestamp))
 
 @Composable
-fun ResponderTopBar(unreadCount: Int) {
+fun ResponderTopBar(unreadCount: Int, onNotifications: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().heightIn(min = 68.dp).padding(horizontal = 20.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -52,7 +52,7 @@ fun ResponderTopBar(unreadCount: Int) {
             Text("Responder Command", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         }
         Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-            IconButton(onClick = {}) {
+            IconButton(onClick = onNotifications) {
                 Icon(Icons.Filled.Notifications, contentDescription = "Incident notifications")
             }
             if (unreadCount > 0) {

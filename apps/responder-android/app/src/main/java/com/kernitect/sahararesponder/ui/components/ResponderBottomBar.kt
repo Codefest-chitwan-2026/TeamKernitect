@@ -4,6 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -19,6 +20,7 @@ fun ResponderBottomBar(current: ResponderDestination, onSelect: (ResponderDestin
                 ResponderDestination.HOME -> Icons.Filled.Home
                 ResponderDestination.MAP -> Icons.Filled.Map
                 ResponderDestination.ACTIVE -> Icons.Filled.LocalFireDepartment
+                ResponderDestination.NOTIFICATIONS -> Icons.Filled.Notifications
             }
             NavigationBarItem(
                 selected = current == destination,
