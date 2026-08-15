@@ -139,3 +139,50 @@ export async function updateSosStatus(
 
   return response.json();
 }
+
+export type ResponderStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+export interface ResponderRegistration {
+  responderId: string;
+  deviceId: string;
+  operatorName: string;
+  organization: string;
+  phone: string;
+  email?: string | null;
+  district: string;
+  status: ResponderStatus;
+  teamId?: string | null;
+  teamName?: string | null;
+  callsign?: string | null;
+  createdAt?: string;
+  rejectionReason?: string | null;
+}
+
+export interface RescueTeam {
+  teamId: string;
+  teamName: string;
+  callsign: string;
+  province: string;
+  district: string;
+  status: string;
+}
+
+async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, options);
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.detail ?? `SAHARA API request failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+export const getResponders = () => apiRequest<{ count: number; items: ResponderRegistration[] }>("/responders");
+export const getRescueTeams = () => apiRequest<{ count: number; items: RescueTeam[] }>("/responders/teams");
+export const approveResponder = (responderId: string, teamId: string) => apiRequest<ResponderRegistration>(
+  `/responders/${encodeURIComponent(responderId)}/approve`,
+  { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ teamId }) },
+);
+export const rejectResponder = (responderId: string) => apiRequest<ResponderRegistration>(
+  `/responders/${encodeURIComponent(responderId)}/reject`,
+  { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: "Registration rejected by SAHARA administrator." }) },
+);
