@@ -10,6 +10,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.kernitect.saharaandroid.data.local.entity.PublicAlertEntity
+import com.kernitect.saharaandroid.data.local.entity.IncidentEntity
+import com.kernitect.saharaandroid.data.local.entity.TrackingEventEntity
+import com.kernitect.saharaandroid.service.MeshServiceState
 import com.kernitect.saharaandroid.ui.components.EmergencyCard
 import com.kernitect.saharaandroid.ui.components.HelpRequestForm
 import com.kernitect.saharaandroid.ui.components.SaharaTopBar
@@ -29,6 +32,15 @@ fun HomeScreen(
 
     unreadNotificationCount: Int =
         0,
+
+    localIncidents: List<IncidentEntity> =
+        emptyList(),
+
+    trackingEvents: List<TrackingEventEntity> =
+        emptyList(),
+
+    responderDistances: Map<String, MeshServiceState.ResponderDistance> =
+        emptyMap(),
 
     onNotificationClick: () -> Unit =
         {},
@@ -93,6 +105,12 @@ fun HomeScreen(
 
 
         TrackingSection(
+            incidents = localIncidents,
+
+            events = trackingEvents,
+
+            responderDistances = responderDistances,
+
             modifier =
                 Modifier.padding(
                     top = 2.dp

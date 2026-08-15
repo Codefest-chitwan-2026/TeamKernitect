@@ -17,6 +17,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
  */
 object MeshServiceState {
 
+    data class ResponderDistance(
+        val incidentId: String,
+        val distanceMeters: Float,
+        val responderAccuracyMeters: Float?,
+        val updatedAt: Long
+    )
+
 
     /*
      * Current human-readable mesh status.
@@ -56,5 +63,15 @@ object MeshServiceState {
     val sentPackets =
         MutableSharedFlow<RescuePacket>(
             extraBufferCapacity = 16
+        )
+
+
+    /*
+     * Live responder positions are intentionally not timeline rows.
+     * Room stores only the significant first-nearby event.
+     */
+    val responderDistances =
+        MutableStateFlow<Map<String, ResponderDistance>>(
+            emptyMap()
         )
 }

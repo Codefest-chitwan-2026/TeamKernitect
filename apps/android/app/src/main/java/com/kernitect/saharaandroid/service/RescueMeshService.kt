@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.location.Location
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -17,7 +18,11 @@ import com.kernitect.saharaandroid.MainActivity
 import com.kernitect.saharaandroid.R
 import com.kernitect.saharaandroid.ble.AppRequirements
 import com.kernitect.saharaandroid.data.local.SaharaDatabase
+import com.kernitect.saharaandroid.data.local.dao.IncidentDao
+import com.kernitect.saharaandroid.data.local.dao.TrackingEventDao
 import com.kernitect.saharaandroid.data.local.entity.IncidentEntity
+import com.kernitect.saharaandroid.data.local.entity.TrackingEventEntity
+import com.kernitect.saharaandroid.data.local.entity.TrackingEventType
 import com.kernitect.saharaandroid.mesh.MeshEngine
 import com.kernitect.saharaandroid.model.ReceivedAlert
 import com.kernitect.saharaandroid.model.RescuePacket
@@ -27,6 +32,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.util.Locale
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 class RescueMeshService : Service() {
 
@@ -79,6 +86,12 @@ class RescueMeshService : Service() {
         private const val EXTRA_EXPLANATION =
             "explanation"
 
+        private const val EXTRA_REQUEST_CREATED_AT =
+            "requestCreatedAt"
+
+        private const val EXTRA_LOCATION_ATTACHED_AT =
+            "locationAttachedAt"
+
 
         /*
          * =========================================
@@ -91,6 +104,9 @@ class RescueMeshService : Service() {
 
         private const val EMERGENCY_CHANNEL_ID =
             "sahara_emergency_packets"
+
+        private const val TRACKING_CHANNEL_ID =
+            "sahara_rescue_tracking"
 
         private const val SERVICE_NOTIFICATION_ID =
             1001
@@ -134,7 +150,11 @@ class RescueMeshService : Service() {
 
             likelyDisaster: String,
 
-            areaSeverity: String
+            areaSeverity: String,
+
+            requestCreatedAt: Long,
+
+            locationAttachedAt: Long
 
         ) {
 
@@ -167,6 +187,16 @@ class RescueMeshService : Service() {
                         EXTRA_AREA_SEVERITY,
                         areaSeverity
                     )
+
+                    putExtra(
+                        EXTRA_REQUEST_CREATED_AT,
+                        requestCreatedAt
+                    )
+
+                    putExtra(
+                        EXTRA_LOCATION_ATTACHED_AT,
+                        locationAttachedAt
+                    )
                 }
 
 
@@ -189,7 +219,11 @@ class RescueMeshService : Service() {
 
             peopleCount: String,
 
-            explanation: String
+            explanation: String,
+
+            requestCreatedAt: Long,
+
+            locationAttachedAt: Long
 
         ) {
 
@@ -226,6 +260,16 @@ class RescueMeshService : Service() {
                     putExtra(
                         EXTRA_EXPLANATION,
                         explanation
+                    )
+
+                    putExtra(
+                        EXTRA_REQUEST_CREATED_AT,
+                        requestCreatedAt
+                    )
+
+                    putExtra(
+                        EXTRA_LOCATION_ATTACHED_AT,
+                        locationAttachedAt
                     )
                 }
 
@@ -291,6 +335,15 @@ class RescueMeshService : Service() {
     private lateinit var meshEngine:
             MeshEngine
 
+    private lateinit var incidentDao:
+            IncidentDao
+
+    private lateinit var trackingEventDao:
+            TrackingEventDao
+
+    private val locallyOriginatedPacketIds =
+        ConcurrentHashMap.newKeySet<String>()
+
 
     private var meshStarted =
         false
@@ -321,12 +374,17 @@ class RescueMeshService : Service() {
          * Database belongs to application process,
          * so it remains available without Activity.
          */
-        val incidentDao =
+        val database =
             SaharaDatabase
                 .getInstance(
                     applicationContext
                 )
-                .incidentDao()
+
+        incidentDao =
+            database.incidentDao()
+
+        trackingEventDao =
+            database.trackingEventDao()
 
 
         /*
@@ -361,64 +419,7 @@ class RescueMeshService : Service() {
                  */
                 onPacketReceived = {
                         packet ->
-
-
-                    val receivedAt =
-                        System.currentTimeMillis()
-
-
-                    val alert =
-                        ReceivedAlert(
-
-                            packet =
-                                packet,
-
-                            receivedAt =
-                                receivedAt
-                        )
-
-
-                    /*
-                     * Persist even when no Activity
-                     * exists.
-                     */
-                    serviceScope.launch {
-
-                        incidentDao.insertIncident(
-
-                            IncidentEntity(
-
-                                id =
-                                    packet.id,
-
-                                packetJson =
-                                    packet.toJson(),
-
-                                receivedAt =
-                                    receivedAt,
-
-                                isRead =
-                                    false
-                            )
-                        )
-                    }
-
-
-                    /*
-                     * In-app popup if UI is alive.
-                     */
-                    MeshServiceState
-                        .incomingAlerts
-                        .tryEmit(
-                            alert
-                        )
-
-
-                    /*
-                     * Android system notification
-                     * works independently from Compose.
-                     */
-                    showEmergencyNotification(
+                    handleReceivedPacket(
                         packet
                     )
                 },
@@ -432,12 +433,20 @@ class RescueMeshService : Service() {
                 onPacketSent = {
                         packet ->
 
+                    persistSuccessfulLocalRelay(
+                        packet
+                    )
 
-                    MeshServiceState
-                        .sentPackets
-                        .tryEmit(
-                            packet
-                        )
+
+                    if (
+                        packet.type == RescuePacket.TYPE_SOS
+                    ) {
+                        MeshServiceState
+                            .sentPackets
+                            .tryEmit(
+                                packet
+                            )
+                    }
                 }
             )
 
@@ -543,7 +552,20 @@ class RescueMeshService : Service() {
                         ?: RescuePacket.SEVERITY_UNKNOWN
 
 
-                meshEngine.originateSos(
+                val requestCreatedAt =
+                    intent.getLongExtra(
+                        EXTRA_REQUEST_CREATED_AT,
+                        System.currentTimeMillis()
+                    )
+
+                val locationAttachedAt =
+                    intent.getLongExtra(
+                        EXTRA_LOCATION_ATTACHED_AT,
+                        requestCreatedAt
+                    )
+
+                val packet =
+                    meshEngine.originateSos(
 
                     latitude =
                         latitude,
@@ -551,11 +573,19 @@ class RescueMeshService : Service() {
                     longitude =
                         longitude,
 
+                    timestamp =
+                        requestCreatedAt,
+
                     likelyDisaster =
                         likelyDisaster,
 
                     areaSeverity =
                         areaSeverity
+                )
+
+                persistLocalRequest(
+                    packet = packet,
+                    locationAttachedAt = locationAttachedAt
                 )
             }
 
@@ -603,7 +633,20 @@ class RescueMeshService : Service() {
                 }
 
 
-                meshEngine.originateHelpRequest(
+                val requestCreatedAt =
+                    intent.getLongExtra(
+                        EXTRA_REQUEST_CREATED_AT,
+                        System.currentTimeMillis()
+                    )
+
+                val locationAttachedAt =
+                    intent.getLongExtra(
+                        EXTRA_LOCATION_ATTACHED_AT,
+                        requestCreatedAt
+                    )
+
+                val packet =
+                    meshEngine.originateHelpRequest(
 
                     latitude =
                         latitude,
@@ -624,7 +667,15 @@ class RescueMeshService : Service() {
                     explanation =
                         intent.getStringExtra(
                             EXTRA_EXPLANATION
-                        ) ?: ""
+                        ) ?: "",
+
+                    timestamp =
+                        requestCreatedAt
+                )
+
+                persistLocalRequest(
+                    packet = packet,
+                    locationAttachedAt = locationAttachedAt
                 )
             }
 
@@ -635,8 +686,13 @@ class RescueMeshService : Service() {
                     meshStarted
                 ) {
 
-                    meshEngine
+                    val cancelledPacket =
+                        meshEngine
                         .cancelPendingForward()
+
+                    cancelledPacket?.let {
+                        discardCancelledUnrelayedRequest(it)
+                    }
                 }
             }
         }
@@ -647,6 +703,349 @@ class RescueMeshService : Service() {
          * after ordinary process reclamation.
          */
         return START_STICKY
+    }
+
+
+    private fun persistLocalRequest(
+        packet: RescuePacket,
+        locationAttachedAt: Long
+    ) {
+
+        locallyOriginatedPacketIds.add(
+            packet.id
+        )
+
+        serviceScope.launch {
+
+            incidentDao.insertIncident(
+                IncidentEntity(
+                    id = packet.id,
+                    packetJson = packet.toJson(),
+                    receivedAt = packet.timestamp,
+                    isRead = true,
+                    isLocalOrigin = true
+                )
+            )
+
+            trackingEventDao.insertEvent(
+                TrackingEventEntity(
+                    id = UUID.randomUUID().toString(),
+                    incidentId = packet.id,
+                    type = TrackingEventType.SOS_CREATED.name,
+                    title = if (
+                        packet.priority == RescuePacket.PRIORITY_CRITICAL
+                    ) {
+                        "SOS Created"
+                    } else {
+                        "Help Request Created"
+                    },
+                    description = "Emergency request created.",
+                    timestamp = packet.timestamp
+                )
+            )
+
+            trackingEventDao.insertEvent(
+                TrackingEventEntity(
+                    id = UUID.randomUUID().toString(),
+                    incidentId = packet.id,
+                    type = TrackingEventType.LOCATION_ATTACHED.name,
+                    title = "Location Attached",
+                    description = String.format(
+                        Locale.getDefault(),
+                        "Location %.5f, %.5f attached.",
+                        packet.latitude,
+                        packet.longitude
+                    ),
+                    timestamp = locationAttachedAt
+                )
+            )
+        }
+    }
+
+
+    private fun persistSuccessfulLocalRelay(
+        packet: RescuePacket
+    ) {
+
+        serviceScope.launch {
+
+            val isLocalRequest =
+                locallyOriginatedPacketIds.contains(packet.id) ||
+                        incidentDao.findLocalIncident(packet.id) != null
+
+            if (
+                isLocalRequest &&
+                packet.type == RescuePacket.TYPE_SOS
+            ) {
+
+                trackingEventDao.insertEvent(
+                    TrackingEventEntity(
+                        id = UUID.randomUUID().toString(),
+                        incidentId = packet.id,
+                        type = TrackingEventType.SOS_RELAYED.name,
+                        title = "Relayed Through RESCUEMESH",
+                        description = "Successfully forwarded to a nearby node.",
+                        timestamp = System.currentTimeMillis()
+                    )
+                )
+            }
+        }
+    }
+
+
+    private fun discardCancelledUnrelayedRequest(
+        packet: RescuePacket
+    ) {
+        serviceScope.launch {
+            val wasRelayed = trackingEventDao.hasEvent(
+                packet.id,
+                TrackingEventType.SOS_RELAYED.name
+            )
+
+            if (
+                !wasRelayed &&
+                incidentDao.findLocalIncident(packet.id) != null
+            ) {
+                trackingEventDao.deleteEventsForIncident(packet.id)
+                incidentDao.deleteLocalIncident(packet.id)
+                locallyOriginatedPacketIds.remove(packet.id)
+            }
+        }
+    }
+
+
+    private fun handleReceivedPacket(
+        packet: RescuePacket
+    ) {
+
+        if (
+            packet.type != RescuePacket.TYPE_SOS
+        ) {
+            processResponderPacket(
+                packet
+            )
+            return
+        }
+
+        val receivedAt =
+            System.currentTimeMillis()
+
+        val alert =
+            ReceivedAlert(
+                packet = packet,
+                receivedAt = receivedAt
+            )
+
+        serviceScope.launch {
+            incidentDao.insertIncident(
+                IncidentEntity(
+                    id = packet.id,
+                    packetJson = packet.toJson(),
+                    receivedAt = receivedAt,
+                    isRead = false,
+                    isLocalOrigin = false
+                )
+            )
+        }
+
+        MeshServiceState
+            .incomingAlerts
+            .tryEmit(alert)
+
+        showEmergencyNotification(
+            packet
+        )
+    }
+
+
+    private fun processResponderPacket(
+        packet: RescuePacket
+    ) {
+
+        val incidentId =
+            packet.incidentId
+                ?: return
+
+        serviceScope.launch {
+
+            val incident =
+                incidentDao.findLocalIncident(
+                    incidentId
+                ) ?: return@launch
+
+            when (packet.type) {
+
+                RescuePacket.TYPE_SOS_ACK -> {
+                    if (
+                        packet.rescueStatus == null ||
+                        packet.rescueStatus == RescuePacket.STATUS_RESPONDER_RECEIVED
+                    ) {
+                        insertResponderStatusEvent(
+                            incidentId = incidentId,
+                            status = RescuePacket.STATUS_RESPONDER_RECEIVED,
+                            timestamp = packet.timestamp
+                        )
+                    }
+                }
+
+                RescuePacket.TYPE_RESCUE_STATUS -> {
+                    packet.rescueStatus?.let {
+                        insertResponderStatusEvent(
+                            incidentId = incidentId,
+                            status = it,
+                            timestamp = packet.timestamp
+                        )
+                    }
+                }
+
+                RescuePacket.TYPE_RESPONDER_LOCATION -> {
+                    processResponderLocation(
+                        incident = incident,
+                        packet = packet
+                    )
+                }
+            }
+        }
+    }
+
+
+    private suspend fun insertResponderStatusEvent(
+        incidentId: String,
+        status: String,
+        timestamp: Long
+    ) {
+
+        val presentation =
+            when (status) {
+                RescuePacket.STATUS_RESPONDER_RECEIVED ->
+                    Triple(
+                        TrackingEventType.RESPONDER_RECEIVED,
+                        "Responder Received SOS",
+                        "Your emergency request reached a rescue team."
+                    )
+
+                RescuePacket.STATUS_ON_THE_WAY ->
+                    Triple(
+                        TrackingEventType.ON_THE_WAY,
+                        "Rescue Team On The Way",
+                        "A rescue team is travelling to your location."
+                    )
+
+                RescuePacket.STATUS_ARRIVED ->
+                    Triple(
+                        TrackingEventType.ARRIVED,
+                        "Responder Arrived",
+                        "The rescue team reported that it has arrived."
+                    )
+
+                RescuePacket.STATUS_RESCUED ->
+                    Triple(
+                        TrackingEventType.RESCUED,
+                        "Rescue Completed",
+                        "The rescue team marked this request as rescued."
+                    )
+
+                else -> return
+            }
+
+        trackingEventDao.insertEvent(
+            TrackingEventEntity(
+                id = UUID.randomUUID().toString(),
+                incidentId = incidentId,
+                type = presentation.first.name,
+                title = presentation.second,
+                description = presentation.third,
+                timestamp = timestamp
+            )
+        )
+    }
+
+
+    private suspend fun processResponderLocation(
+        incident: IncidentEntity,
+        packet: RescuePacket
+    ) {
+
+        val citizenPacket =
+            RescuePacket.fromJson(
+                incident.packetJson
+            ) ?: return
+
+        val results =
+            FloatArray(1)
+
+        Location.distanceBetween(
+            citizenPacket.latitude,
+            citizenPacket.longitude,
+            packet.latitude,
+            packet.longitude,
+            results
+        )
+
+        val distanceMeters =
+            results[0]
+
+        MeshServiceState.responderDistances.value =
+            MeshServiceState.responderDistances.value +
+                    (
+                            incident.id to
+                                    MeshServiceState.ResponderDistance(
+                                        incidentId = incident.id,
+                                        distanceMeters = distanceMeters,
+                                        responderAccuracyMeters = packet.responderAccuracyMeters,
+                                        updatedAt = packet.timestamp
+                                    )
+                            )
+
+        val rescueIsActive =
+            !trackingEventDao.hasEvent(
+                incident.id,
+                TrackingEventType.RESCUED.name
+            )
+
+        val responderIsOnTheWay =
+            trackingEventDao.hasEvent(
+                incident.id,
+                TrackingEventType.ON_THE_WAY.name
+            )
+
+        val accuracyIsUsable =
+            packet.responderAccuracyMeters != null &&
+                    packet.responderAccuracyMeters <= 40f
+
+        if (
+            rescueIsActive &&
+            responderIsOnTheWay &&
+            accuracyIsUsable &&
+            distanceMeters <= 80f
+        ) {
+
+            val inserted =
+                trackingEventDao.insertEvent(
+                    TrackingEventEntity(
+                        id = UUID.randomUUID().toString(),
+                        incidentId = incident.id,
+                        type = TrackingEventType.RESPONDER_NEARBY.name,
+                        title = "Responder Nearby",
+                        description = "Rescue team is approximately ${distanceMeters.toInt()} m away.",
+                        timestamp = packet.timestamp,
+                        distanceMeters = distanceMeters.toDouble()
+                    )
+                )
+
+            /*
+             * The database uniqueness constraint is the notification gate.
+             * A fluctuating GPS reading can never notify twice for an incident.
+             */
+            if (
+                inserted != -1L
+            ) {
+                showResponderNearbyNotification(
+                    incidentId = incident.id,
+                    distanceMeters = distanceMeters
+                )
+            }
+        }
     }
 
 
@@ -891,6 +1290,49 @@ class RescueMeshService : Service() {
     }
 
 
+    @SuppressLint("MissingPermission")
+    private fun showResponderNearbyNotification(
+        incidentId: String,
+        distanceMeters: Float
+    ) {
+
+        if (
+            !AppRequirements.hasNotificationPermission(this)
+        ) {
+            return
+        }
+
+        val roundedDistance =
+            distanceMeters.toInt()
+
+        val body =
+            "Your rescue team is approximately $roundedDistance meters away. " +
+                    "Stay where you are if it is safe to do so."
+
+        val notification =
+            NotificationCompat.Builder(
+                this,
+                TRACKING_CHANNEL_ID
+            )
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle("Rescue Team Nearby")
+                .setContentText(body)
+                .setStyle(
+                    NotificationCompat.BigTextStyle().bigText(body)
+                )
+                .setContentIntent(createOpenAppIntent())
+                .setAutoCancel(true)
+                .setCategory(NotificationCompat.CATEGORY_STATUS)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .build()
+
+        NotificationManagerCompat.from(this).notify(
+            incidentId.hashCode().and(0x7fffffff) xor 0x52455343,
+            notification
+        )
+    }
+
+
     private fun buildCriticalNotificationText(
         packet: RescuePacket
     ): String {
@@ -1049,6 +1491,18 @@ class RescueMeshService : Service() {
             }
 
 
+        val trackingChannel =
+            NotificationChannel(
+                TRACKING_CHANNEL_ID,
+                "Rescue Tracking",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description =
+                    "Important status updates for your active rescue request."
+                enableVibration(true)
+            }
+
+
         manager.createNotificationChannel(
             relayChannel
         )
@@ -1056,6 +1510,11 @@ class RescueMeshService : Service() {
 
         manager.createNotificationChannel(
             emergencyChannel
+        )
+
+
+        manager.createNotificationChannel(
+            trackingChannel
         )
     }
 

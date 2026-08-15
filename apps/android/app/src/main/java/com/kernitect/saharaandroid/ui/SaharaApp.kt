@@ -16,8 +16,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.kernitect.saharaandroid.data.local.entity.PublicAlertEntity
+import com.kernitect.saharaandroid.data.local.entity.IncidentEntity
+import com.kernitect.saharaandroid.data.local.entity.TrackingEventEntity
 import com.kernitect.saharaandroid.model.ReceivedAlert
 import com.kernitect.saharaandroid.model.WitnessReport
+import com.kernitect.saharaandroid.service.MeshServiceState
 import com.kernitect.saharaandroid.ui.components.IncomingAlertBanner
 import com.kernitect.saharaandroid.ui.navigation.AppDestination
 import com.kernitect.saharaandroid.ui.navigation.BottomNavigationBar
@@ -44,6 +47,15 @@ fun SaharaApp(
 
     unreadNotificationCount: Int =
         0,
+
+    localIncidents: List<IncidentEntity> =
+        emptyList(),
+
+    trackingEvents: List<TrackingEventEntity> =
+        emptyList(),
+
+    responderDistances: Map<String, MeshServiceState.ResponderDistance> =
+        emptyMap(),
 
     incomingAlert: ReceivedAlert? =
         null,
@@ -342,6 +354,18 @@ fun SaharaApp(
 
                             unreadNotificationCount =
                                 unreadNotificationCount,
+
+
+                            localIncidents =
+                                localIncidents,
+
+
+                            trackingEvents =
+                                trackingEvents,
+
+
+                            responderDistances =
+                                responderDistances,
 
 
                             /*

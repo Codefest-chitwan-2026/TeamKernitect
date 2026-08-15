@@ -519,6 +519,9 @@ class MeshEngine(
 
         longitude: Double,
 
+        timestamp: Long =
+            System.currentTimeMillis(),
+
         likelyDisaster: String =
             RescuePacket.DISASTER_UNKNOWN,
 
@@ -537,6 +540,9 @@ class MeshEngine(
 
                     longitude =
                         longitude,
+
+                    timestamp =
+                        timestamp,
 
                     likelyDisaster =
                         likelyDisaster,
@@ -593,7 +599,10 @@ class MeshEngine(
 
         peopleCount: String,
 
-        explanation: String
+        explanation: String,
+
+        timestamp: Long =
+            System.currentTimeMillis()
 
     ): RescuePacket {
 
@@ -615,7 +624,10 @@ class MeshEngine(
                         peopleCount,
 
                     explanation =
-                        explanation
+                        explanation,
+
+                    timestamp =
+                        timestamp
                 )
 
 
@@ -718,7 +730,10 @@ class MeshEngine(
      * =========================================
      */
 
-    fun cancelPendingForward() {
+    fun cancelPendingForward(): RescuePacket? {
+
+        val cancelledPacket =
+            pendingPacket ?: sendingPacket
 
         cancelScanTimers()
 
@@ -768,6 +783,9 @@ class MeshEngine(
         postStatus(
             "Pending request cancelled"
         )
+
+
+        return cancelledPacket
     }
 
 
@@ -811,9 +829,15 @@ class MeshEngine(
         }
 
 
+        val supportedType =
+            packet.type == RescuePacket.TYPE_SOS ||
+                    packet.type == RescuePacket.TYPE_SOS_ACK ||
+                    packet.type == RescuePacket.TYPE_RESCUE_STATUS ||
+                    packet.type == RescuePacket.TYPE_RESPONDER_LOCATION
+
+
         if (
-            packet.type !=
-            RescuePacket.TYPE_SOS
+            !supportedType
         ) {
 
             postStatus(
@@ -833,7 +857,7 @@ class MeshEngine(
         ) {
 
             postStatus(
-                "Duplicate SOS ${packet.id.take(8)} ignored"
+                "Duplicate packet ${packet.id.take(8)} ignored"
             )
 
 
@@ -849,6 +873,7 @@ class MeshEngine(
         Log.d(
             TAG,
             "Received packet=${packet.id} " +
+                    "type=${packet.type} " +
                     "priority=${packet.priority} " +
                     "hop=${packet.hopCount} " +
                     "source=$sourceAddress"
@@ -856,7 +881,7 @@ class MeshEngine(
 
 
         postStatus(
-            "Received ${packet.priority} request ${packet.id.take(8)} " +
+            "Received ${packet.type} packet ${packet.id.take(8)} " +
                     "at hop ${packet.hopCount}"
         )
 
