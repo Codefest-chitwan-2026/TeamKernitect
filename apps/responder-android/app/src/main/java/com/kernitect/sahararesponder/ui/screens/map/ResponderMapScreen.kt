@@ -23,6 +23,11 @@ import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
+import com.kernitect.sahararesponder.map.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.osmdroid.tileprovider.tilesource.XYTileSource
+import java.io.File
 
 @Composable
 fun ResponderMapScreen(
@@ -34,6 +39,14 @@ fun ResponderMapScreen(
     modifier: Modifier = Modifier,
 ) {
     var mapView by remember { mutableStateOf<MapView?>(null) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val mapSetup by produceState<MapSetup?>(null, context) {
+        value = withContext(Dispatchers.IO) {
+            val manager = ResponderOfflineMapManager(context.applicationContext)
+            val archive = manager.prepareArchive()
+            MapSetup(selectMapMode(manager.hasNetwork(), archive != null), archive)
+        }
+    }
     val validIncidents = incidents.filter { RescueNavigationCalculator.isValidCoordinate(it.latitude, it.longitude) }
     val distance = focusedIncident?.let { responderLocation?.let { location -> RescueNavigationCalculator.distanceMeters(location, it.latitude, it.longitude) } }
     val bearing = focusedIncident?.let { responderLocation?.let { location -> RescueNavigationCalculator.bearingDegrees(location, it.latitude, it.longitude) } }
@@ -41,12 +54,23 @@ fun ResponderMapScreen(
     Column(modifier.fillMaxSize()) {
         MapHeader(focused = focusedIncident != null, onBack = onBack)
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            ResponderMapView(
+            mapSetup?.let { setup -> ResponderMapView(
                 incidents = validIncidents,
                 responderLocation = responderLocation,
                 focusedIncident = focusedIncident,
+                setup = setup,
                 onMapAvailable = { mapView = it },
-            )
+            ) }
+            MapModeBadge(mapSetup?.mode, Modifier.align(Alignment.TopEnd).padding(12.dp))
+            if (mapSetup?.mode == ResponderMapMode.OFFLINE_COVERAGE_UNAVAILABLE) {
+                Surface(Modifier.align(Alignment.Center).padding(24.dp), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)) {
+                    Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("OFFLINE MAP", fontWeight = FontWeight.Bold)
+                        Text("Map tiles are unavailable for this area.")
+                        Text("GPS, victim location, distance and bearing remain available.", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
             if (validIncidents.isEmpty() && focusedIncident == null) {
                 Surface(
                     Modifier.align(Alignment.TopCenter).padding(12.dp),
@@ -93,6 +117,14 @@ fun ResponderMapScreen(
     }
 }
 
+private data class MapSetup(val mode: ResponderMapMode, val archive: File?)
+
+@Composable private fun MapModeBadge(mode: ResponderMapMode?, modifier: Modifier) {
+    Surface(modifier, shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f), shadowElevation = 2.dp) {
+        Text(when (mode) { ResponderMapMode.ONLINE -> "Online Map"; ResponderMapMode.OFFLINE -> "Offline Map"; ResponderMapMode.OFFLINE_COVERAGE_UNAVAILABLE -> "Offline coverage unavailable"; null -> "Preparing map…" }, Modifier.padding(horizontal = 10.dp, vertical = 6.dp), style = MaterialTheme.typography.labelMedium)
+    }
+}
+
 @Composable
 private fun MapHeader(focused: Boolean, onBack: (() -> Unit)?) {
     Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -110,14 +142,21 @@ private fun ResponderMapView(
     incidents: List<ResponderIncident>,
     responderLocation: ResponderLocation?,
     focusedIncident: ResponderIncident?,
+    setup: MapSetup,
     onMapAvailable: (MapView?) -> Unit,
 ) {
-    AndroidView(
+    key(setup.mode, setup.archive?.absolutePath) { AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { context ->
-            MapView(context).apply {
-                setTileSource(TileSourceFactory.MAPNIK)
-                setUseDataConnection(true)
+            val map = if (setup.mode == ResponderMapMode.OFFLINE && setup.archive != null) {
+                val provider = ResponderOfflineMapManager(context.applicationContext).offlineProvider(setup.archive)
+                val sourceName = provider.archives.firstOrNull()?.tileSources?.firstOrNull() ?: "Mapnik"
+                provider.setTileSource(XYTileSource(sourceName, 10, 17, 256, ".png", emptyArray()))
+                MapView(context, provider)
+            } else MapView(context)
+            map.apply {
+                setTileSource(if (setup.mode == ResponderMapMode.ONLINE) TileSourceFactory.MAPNIK else tileProvider.tileSource)
+                setUseDataConnection(setup.mode == ResponderMapMode.ONLINE)
                 setMultiTouchControls(true)
                 controller.setZoom(12.0)
                 controller.setCenter(GeoPoint(27.68, 84.43))
@@ -131,7 +170,7 @@ private fun ResponderMapView(
             map.onPause()
             map.onDetach()
         },
-    )
+    ) }
 }
 
 private data class MapRuntimeState(val signature: String, val cameraInitialized: Boolean)
