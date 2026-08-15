@@ -21,6 +21,8 @@ import com.kernitect.saharaandroid.ui.theme.SaharaAndroidTheme
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.mutableStateListOf
 import com.kernitect.saharaandroid.model.ReceivedAlert
+import android.preference.PreferenceManager
+import org.osmdroid.config.Configuration
 
 class MainActivity : ComponentActivity() {
 
@@ -28,6 +30,16 @@ class MainActivity : ComponentActivity() {
         savedInstanceState: Bundle?
     ) {
         super.onCreate(savedInstanceState)
+
+        Configuration.getInstance().load(
+            applicationContext,
+            PreferenceManager.getDefaultSharedPreferences(
+                applicationContext
+            )
+        )
+
+        Configuration.getInstance().userAgentValue =
+            packageName
 
         setContent {
 

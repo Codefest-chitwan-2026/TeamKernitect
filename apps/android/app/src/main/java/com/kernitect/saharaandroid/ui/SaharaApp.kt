@@ -50,21 +50,38 @@ fun SaharaApp(
 ) {
 
     var currentDestination by remember {
+
         mutableStateOf(
             AppDestination.HOME
         )
     }
 
+    /*
+     * Which SOS should the Map screen
+     * zoom directly into?
+     *
+     * Later the notification screen's
+     * "See Map" button will set this.
+     */
+    var focusedMapAlert by remember {
+
+        mutableStateOf<ReceivedAlert?>(
+            null
+        )
+    }
+
     Box(
-        modifier = Modifier.fillMaxSize()
+        modifier =
+            Modifier.fillMaxSize()
     ) {
 
         Scaffold(
-            containerColor = Color.White,
+            containerColor =
+                Color.White,
 
             /*
-             * Hide bottom navigation while
-             * viewing notifications.
+             * Hide bottom navigation on
+             * notification history.
              */
             bottomBar = {
 
@@ -88,6 +105,14 @@ fun SaharaApp(
 
                         onMapClick = {
 
+                            /*
+                             * Focus the newest SOS
+                             * when opening Map normally.
+                             */
+                            focusedMapAlert =
+                                receivedAlerts
+                                    .firstOrNull()
+
                             currentDestination =
                                 AppDestination.MAP
                         }
@@ -97,11 +122,12 @@ fun SaharaApp(
         ) { innerPadding ->
 
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(
-                        innerPadding
-                    )
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .padding(
+                            innerPadding
+                        )
             ) {
 
                 when (
@@ -113,6 +139,15 @@ fun SaharaApp(
                         HomeScreen(
                             onMapClick = {
 
+                                /*
+                                 * Emergency card's MAP
+                                 * button also opens the
+                                 * latest alert.
+                                 */
+                                focusedMapAlert =
+                                    receivedAlerts
+                                        .firstOrNull()
+
                                 currentDestination =
                                     AppDestination.MAP
                             },
@@ -122,14 +157,8 @@ fun SaharaApp(
 
                             onNotificationClick = {
 
-                                /*
-                                 * Clear unread badge.
-                                 */
                                 onNotificationsOpened()
 
-                                /*
-                                 * Open notification history.
-                                 */
                                 currentDestination =
                                     AppDestination.NOTIFICATIONS
                             },
@@ -146,7 +175,30 @@ fun SaharaApp(
 
                     AppDestination.MAP -> {
 
-                        MapScreen()
+                        MapScreen(
+                            /*
+                             * Show every received SOS.
+                             */
+                            alerts =
+                                receivedAlerts,
+
+                            /*
+                             * Zoom into this one.
+                             */
+                            focusedAlert =
+                                focusedMapAlert,
+
+                            unreadNotificationCount =
+                                unreadNotificationCount,
+
+                            onNotificationClick = {
+
+                                onNotificationsOpened()
+
+                                currentDestination =
+                                    AppDestination.NOTIFICATIONS
+                            }
+                        )
                     }
 
                     AppDestination.NOTIFICATIONS -> {
@@ -167,60 +219,54 @@ fun SaharaApp(
         }
 
         /*
-         * =========================================
-         * IN-APP HEADS-UP NOTIFICATION
-         * =========================================
-         *
-         * Appears above whichever screen
-         * the user is currently viewing.
+         * =====================================
+         * IN-APP SOS ALERT BANNER
+         * =====================================
          */
-        incomingAlert?.let { alert ->
+        incomingAlert?.let {
+                alert ->
 
             IncomingAlertBanner(
-                alert = alert,
+                alert =
+                    alert,
 
-                /*
-                 * Clicking the banner opens
-                 * notification history.
-                 */
                 onClick = {
 
                     /*
-                     * Remove the temporary banner.
+                     * Remove heads-up banner.
                      */
                     onIncomingAlertDismissed()
 
                     /*
-                     * Clear unread badge because
-                     * notifications are being opened.
+                     * Mark notifications as read.
                      */
                     onNotificationsOpened()
 
+                    /*
+                     * Open notification history.
+                     */
                     currentDestination =
                         AppDestination.NOTIFICATIONS
                 },
 
-                /*
-                 * Called automatically when
-                 * the countdown bar finishes.
-                 */
                 onDismiss = {
 
                     onIncomingAlertDismissed()
                 },
 
-                modifier = Modifier
-                    .align(
-                        Alignment.TopCenter
-                    )
-                    .padding(
-                        start = 12.dp,
-                        end = 12.dp,
-                        top = 10.dp
-                    )
-                    .zIndex(
-                        10f
-                    )
+                modifier =
+                    Modifier
+                        .align(
+                            Alignment.TopCenter
+                        )
+                        .padding(
+                            start = 12.dp,
+                            end = 12.dp,
+                            top = 10.dp
+                        )
+                        .zIndex(
+                            10f
+                        )
             )
         }
     }
