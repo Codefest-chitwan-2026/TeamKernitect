@@ -6,7 +6,15 @@ export default function TeamManagement({ onAssign }: { onAssign: () => void }) {
   const [teams, setTeams] = useState<RescueTeam[]>([]); const [responders, setResponders] = useState<ResponderRegistration[]>([]);
   const [selected, setSelected] = useState<Record<string, string>>({}); const [error, setError] = useState<string | null>(null); const [loading, setLoading] = useState(true);
   const load = async () => { setLoading(true); setError(null); try { const [teamData, responderData] = await Promise.all([getRescueTeams(), getResponders()]); setTeams(teamData.items); setResponders(responderData.items); } catch (value) { setError(value instanceof Error ? value.message : "Unable to load responder management"); } finally { setLoading(false); } };
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+  const initialLoad = window.setTimeout(() => {
+    void load();
+  }, 0);
+
+  return () => {
+    window.clearTimeout(initialLoad);
+  };
+}, []);
   const approve = async (responder: ResponderRegistration) => { const teamId = selected[responder.responderId]; if (!teamId) return; try { await approveResponder(responder.responderId, teamId); await load(); } catch (value) { setError(value instanceof Error ? value.message : "Approval failed"); } };
   const reject = async (responder: ResponderRegistration) => { try { await rejectResponder(responder.responderId); await load(); } catch (value) { setError(value instanceof Error ? value.message : "Rejection failed"); } };
   const pending = responders.filter(item => item.status === "PENDING");

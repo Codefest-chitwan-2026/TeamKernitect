@@ -52,7 +52,21 @@ function App() {
         setLoading(false);
       }
   }, []);
-  useEffect(() => { void loadSos(); const timer = window.setInterval(() => void loadSos(), 20_000); return () => window.clearInterval(timer); }, [loadSos]);
+
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => {
+      void loadSos();
+    }, 0);
+
+    const timer = window.setInterval(() => {
+      void loadSos();
+    }, 20_000);
+
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.clearInterval(timer);
+    };
+  }, [loadSos]);
 
   const renderPage = () => {
     if (loading) {
