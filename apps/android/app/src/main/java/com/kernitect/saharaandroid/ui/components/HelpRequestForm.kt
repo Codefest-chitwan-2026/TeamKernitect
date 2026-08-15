@@ -91,7 +91,7 @@ fun HelpRequestForm(
 
             Text(
                 text = "Ask for help.",
-                fontSize = 15.sp,
+                fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.Black
             )

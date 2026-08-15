@@ -4,9 +4,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -16,6 +13,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.kernitect.saharaandroid.R
+
 
 @Composable
 fun SaharaTopBar(
@@ -33,14 +34,12 @@ fun SaharaTopBar(
          * Temporary text logo.
          * We'll replace this with your actual Sahara logo asset.
          */
-        Text(
-            text = "SAHARA",
-            modifier = Modifier.align(
-                Alignment.CenterStart
-            ),
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Black,
-            color = Color(0xFFE60000)
+        Image(
+            painter = painterResource(id = R.drawable.saharalogo),
+            contentDescription = "Sahara logo",
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .size(50.dp)
         )
 
         /*
@@ -51,7 +50,7 @@ fun SaharaTopBar(
             modifier = Modifier.align(
                 Alignment.Center
             ),
-            fontSize = 18.sp,
+            fontSize = 19.sp,
             fontWeight = FontWeight.Bold,
             color = Color.Black
         )
@@ -63,13 +62,12 @@ fun SaharaTopBar(
             onClick = onNotificationClick,
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .size(42.dp)
+                .size(50.dp)
         ) {
-            Icon(
-                imageVector = Icons.Default.Notifications,
+            Image(
+                painter = painterResource(id = R.drawable.bell),
                 contentDescription = "Notifications",
-                modifier = Modifier.size(25.dp),
-                tint = Color.Black
+                modifier = Modifier.size(25.dp)
             )
         }
     }

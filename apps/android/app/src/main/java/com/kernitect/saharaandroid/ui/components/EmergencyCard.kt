@@ -43,7 +43,7 @@ fun EmergencyCard(
             Text(
                 text = "Emergency Alert",
                 color = Color.White,
-                fontSize = 18.sp,
+                fontSize = 25.sp,
                 fontWeight = FontWeight.Bold
             )
 
@@ -51,7 +51,7 @@ fun EmergencyCard(
                 text = "Type: $type",
                 modifier = Modifier.padding(top = 5.dp),
                 color = Color.White,
-                fontSize = 12.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Medium
             )
 
@@ -74,17 +74,17 @@ fun EmergencyCard(
                     onClick = onMapClick,
                     shape = RoundedCornerShape(50),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFFFE4E4),
+                        containerColor = Color(0xFFF3BEBE),
                         contentColor = Color.Black
                     ),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        horizontal = 18.dp,
-                        vertical = 2.dp
+                        horizontal = 15.dp,
+                        vertical = 3.dp
                     )
                 ) {
                     Text(
                         text = "MAP",
-                        fontSize = 10.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }

@@ -1,11 +1,10 @@
 package com.kernitect.saharaandroid.ui.components
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -21,31 +20,33 @@ fun SosButton(
     modifier: Modifier = Modifier
 ) {
     Box(
-        modifier = modifier,
+        modifier = modifier
+            .size(85.dp)
+            .background(
+                color = Color.White,
+                shape = CircleShape
+            )
+            .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
 
-        Button(
-            onClick = onClick,
-            modifier = Modifier.size(76.dp),
-            shape = CircleShape,
-
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFFFF0000),
-                contentColor = Color.Black
-            ),
-
-            border = BorderStroke(
-                width = 5.dp,
-                color = Color.White
-            )
+        Box(
+            modifier = Modifier
+                .size(70.dp)
+                .background(
+                    color = Color(0xFFFF0000),
+                    shape = CircleShape
+                ),
+            contentAlignment = Alignment.Center
         ) {
 
             Text(
                 text = "SOS",
-                fontSize = 21.sp,
-                fontWeight = FontWeight.Black,
-                color = Color.Black
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.Black,
+                maxLines = 1,
+                softWrap = false
             )
         }
     }
