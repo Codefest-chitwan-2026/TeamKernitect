@@ -6,11 +6,11 @@ export default function MapPage({ sosItems }: { sosItems: Sos[] }) {
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-gray-900">
-          Live Map
+          Operations Map
         </h2>
 
         <p className="mt-1 text-sm text-gray-500">
-          Monitor victims, rescue teams and completed rescues.
+          Victim locations and latest synchronized responder snapshots; this is not live tracking.
         </p>
       </div>
 

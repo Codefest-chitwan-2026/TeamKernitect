@@ -20,9 +20,18 @@ router = APIRouter(prefix="/responders", tags=["Responders"])
 
 LIFECYCLE_RANK = {"ACCEPTED": 1, "ON_THE_WAY": 2, "NEARBY": 3, "ARRIVED": 4, "RESCUED": 5}
 STATUS_TIME_FIELD = {"ACCEPTED": "acceptedAt", "ON_THE_WAY": "onTheWayAt", "NEARBY": "nearbyAt", "ARRIVED": "arrivedAt", "RESCUED": "rescuedAt"}
+EVENT_SEMANTIC_FIELDS = (
+    "eventId", "eventType", "incidentId", "responderId", "teamId", "status",
+    "latitude", "longitude", "eventTimestamp", "priority", "message",
+    "victimLatitude", "victimLongitude",
+)
 
 def is_forward_lifecycle(current: str | None, candidate: str) -> bool:
     return LIFECYCLE_RANK.get(candidate, 0) > LIFECYCLE_RANK.get(current or "", 0)
+
+
+def has_same_event_semantics(stored: dict, candidate: dict) -> bool:
+    return all(stored.get(field) == candidate.get(field) for field in EVENT_SEMANTIC_FIELDS)
 
 
 def public_profile(document: dict) -> dict:
@@ -101,11 +110,7 @@ async def sync_responder_rescue(request: ResponderRescueSyncRequest):
             continue
         existing_event = await responder_rescue_events_collection.find_one({"eventId": event.eventId})
         if existing_event is not None:
-            same_logical_event = (existing_event.get("incidentId") == event.incidentId and
-                                  existing_event.get("eventType") == event.eventType.value and
-                                  existing_event.get("responderId") == request.responderId and
-                                  existing_event.get("teamId") == request.teamId)
-            if same_logical_event:
+            if has_same_event_semantics(existing_event, event.model_dump(mode="json")):
                 accepted.append(event.eventId)
             else:
                 rejected.append({"eventId": event.eventId, "reason": "eventId is already used by a different event."})
@@ -119,15 +124,19 @@ async def sync_responder_rescue(request: ResponderRescueSyncRequest):
             await responder_rescue_events_collection.insert_one(event_document)
         except DuplicateKeyError:
             raced_event = await responder_rescue_events_collection.find_one({"eventId": event.eventId})
-            if raced_event and raced_event.get("incidentId") == event.incidentId and raced_event.get("responderId") == request.responderId:
+            if raced_event and has_same_event_semantics(raced_event, event.model_dump(mode="json")):
                 accepted.append(event.eventId)
             else:
                 rejected.append({"eventId": event.eventId, "reason": "eventId conflicted with another upload."})
             continue
         base = {"id": event.incidentId, "revision": 1, "type": "EMERGENCY", "priority": (event.priority.value if event.priority else "CRITICAL"),
-                "message": event.message, "latitude": event.victimLatitude or 0.0, "longitude": event.victimLongitude or 0.0,
+                "message": event.message, "latitude": event.victimLatitude, "longitude": event.victimLongitude,
                 "timestamp": event.eventTimestamp, "hopCount": 0, "maxHops": 10, "status": "NEW", "receivedAt": now}
-        await sos_collection.update_one({"id": event.incidentId}, {"$setOnInsert": base, "$set": {"updatedAt": now}}, upsert=True)
+        await sos_collection.update_one(
+            {"id": event.incidentId},
+            {"$setOnInsert": base, "$set": {"updatedAt": now, "lastResponderSyncAt": now}},
+            upsert=True,
+        )
 
         if event.eventType == ResponderRescueEventType.RESCUE_CLAIM:
             incident = await sos_collection.find_one({"id": event.incidentId})
@@ -146,7 +155,7 @@ async def sync_responder_rescue(request: ResponderRescueSyncRequest):
             fields = {"lastResponderLatitude": event.latitude, "lastResponderLongitude": event.longitude, "updatedAt": now}
             if is_forward_lifecycle(team_current, event.status):
                 fields[f"teamLifecycle.{request.teamId}"] = event.status
-            if is_forward_lifecycle(incident.get("currentLifecycleStatus"), event.status):
+            if incident.get("assignedTeamId") == request.teamId and is_forward_lifecycle(incident.get("currentLifecycleStatus"), event.status):
                 fields.update({"currentLifecycleStatus": event.status, STATUS_TIME_FIELD[event.status]: event.eventTimestamp})
             await sos_collection.update_one({"id": event.incidentId}, {"$set": fields})
         accepted.append(event.eventId)

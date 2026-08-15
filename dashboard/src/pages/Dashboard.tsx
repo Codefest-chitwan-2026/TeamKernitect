@@ -17,7 +17,8 @@ export default function Dashboard({
   const totalActive = stats?.total ?? sosItems.length;
   const responding = stats?.responding ?? 0;
   const resolved = stats?.resolved ?? 0;
-  const assigned = sosItems.filter(item => item.assignedTeamId).length;
+  const assigned = new Set(sosItems.flatMap(item => item.assignedTeamId ? [item.assignedTeamId] : [])).size;
+  const onMission = new Set(sosItems.flatMap(item => item.assignedTeamId && item.currentLifecycleStatus !== "RESCUED" ? [item.assignedTeamId] : [])).size;
   const rescued = sosItems.filter(item => item.currentLifecycleStatus === "RESCUED").length;
 
   return (
@@ -41,7 +42,7 @@ export default function Dashboard({
         />
 
         <StatCard
-          title="Available Rescue Teams"
+          title="Assigned Rescue Teams"
           value={String(assigned).padStart(2, "0")}
           subtitle="Emergencies assigned to responders"
           type="available"
@@ -49,8 +50,8 @@ export default function Dashboard({
 
         <StatCard
           title="Teams On Mission"
-          value={String(rescued).padStart(2, "0")}
-          subtitle="Rescues synchronized as completed"
+          value={String(onMission).padStart(2, "0")}
+          subtitle={`${rescued} rescues synchronized as completed`}
           type="active"
         />
 
